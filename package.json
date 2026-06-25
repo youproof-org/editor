@@ -1,0 +1,73 @@
+{
+  "name": "youproof-editor",
+  "publisher": "dkuratowski",
+  "displayName": "YouProof Editor",
+  "description": "Sidebar explorer for YouProof mathematical content YAML files",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "youproof-explorer",
+          "title": "YouProof Editor",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "youproof-explorer": [
+        {
+          "type": "webview",
+          "id": "youproofSidebar",
+          "name": "Content Explorer",
+          "icon": "media/icon.png"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "youproof.nodeEditor",
+        "displayName": "YouProof Node Editor",
+        "selector": [{ "filenamePattern": "*.youproof-node" }],
+        "priority": "default"
+      }
+    ],
+    "configuration": {
+      "title": "YouProof Editor",
+      "properties": {
+        "youproof.contentRoot": {
+          "type": "string",
+          "description": "Path to the YouProof content directory. Absolute, or relative to the workspace root."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./ && esbuild media/src/sidebar/index.tsx --bundle --outfile=media/panel.js --platform=browser --format=iife --jsx=automatic --sourcemap && esbuild media/src/editor/index.tsx --bundle --outfile=media/editor.js --platform=browser --format=iife --jsx=automatic --sourcemap",
+    "watch": "tsc -watch -p ./",
+    "postinstall": "node scripts/install-extension.js"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.21.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
