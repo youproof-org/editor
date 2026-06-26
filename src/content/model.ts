@@ -1,0 +1,186 @@
+// ─── Shared primitives ────────────────────────────────────────────────────────
+
+export type NodeType =
+  | 'book' | 'part' | 'chapter' | 'section'
+  | 'namespace'
+  | 'definition' | 'theorem' | 'proof' | 'remark';
+
+export interface LabelCase { base?: string; suffix?: string; }
+export interface Labels { canonical: string; cases?: Record<string, LabelCase>; }
+
+// ─── Term (inline, no file) ───────────────────────────────────────────────────
+
+export interface Term {
+  id: string;
+  name: string;
+  display: string;
+  canonical: string;
+  synonyms: string[];
+  parent: Definition | Theorem | Remark;
+}
+
+// ─── Reference target ─────────────────────────────────────────────────────────
+
+export type RefTargetType =
+  | 'chapter' | 'section'
+  | 'definition' | 'theorem' | 'proof' | 'remark'
+  | 'claim' | 'term'
+  | 'external';
+
+/** target = resolved ID of the referenced object, or URL when type === 'external'. */
+export interface RefTarget {
+  type: RefTargetType;
+  target: string;
+}
+
+// ─── Reference (inline, no file) ─────────────────────────────────────────────
+
+export type RefParent = Chapter | Section | Definition | Theorem | Proof | Remark;
+
+export interface Reference {
+  id: string;
+  name: string;
+  display: string;
+  target: RefTarget;
+  parent: RefParent;
+}
+
+// ─── Content blocks ───────────────────────────────────────────────────────────
+
+export type BlockParent =
+  | Chapter | Section | Definition | Theorem | Proof | Remark
+  | SubsectionBlock | DetailsBlock;
+
+interface BlockBase {
+  id: string;
+  context?: 'web' | 'latex';
+  parent: BlockParent;
+}
+
+export interface NarrativeBlock    extends BlockBase { blockType: 'narrative';      content: string; }
+export interface FormulaBlock      extends BlockBase { blockType: 'formula';        leadIn?: string; content: string; leadOut?: string; }
+export interface FigureBlock       extends BlockBase {
+  blockType: 'figure';
+  leadIn?: string; src: string; alt?: string; caption?: string;
+  size?: 'small' | 'medium' | 'large';
+  selfReference?: { display: string };
+}
+export interface OrderedListBlock  extends BlockBase { blockType: 'ordered-list';   leadIn?: string; items: string[]; }
+export interface UnorderedListBlock extends BlockBase { blockType: 'unordered-list'; leadIn?: string; items: string[]; }
+export interface TypewriterBlock   extends BlockBase { blockType: 'typewriter';     leadIn?: string; rows: string[]; }
+export interface QuoteBlock        extends BlockBase { blockType: 'quote';          leadIn?: string; quote: string; author?: string; }
+export interface SubsectionBlock   extends BlockBase { blockType: 'subsection';     title: string; blocks: ContentBlock[]; }
+export interface DetailsBlock      extends BlockBase { blockType: 'details';        title?: string; blocks: ContentBlock[]; }
+export interface EmbedBlock        extends BlockBase { blockType: 'embed';          target: RefTarget; showTitle?: boolean; }
+export interface RecallBlock       extends BlockBase { blockType: 'recall';         target: RefTarget; }
+export interface ClaimBlock        extends BlockBase { blockType: 'claim';          name: string; content: string; formula?: string; }
+
+export type ContentBlock =
+  | NarrativeBlock | FormulaBlock | FigureBlock
+  | OrderedListBlock | UnorderedListBlock | TypewriterBlock | QuoteBlock
+  | SubsectionBlock | DetailsBlock
+  | EmbedBlock | RecallBlock | ClaimBlock;
+
+// ─── Book hierarchy ───────────────────────────────────────────────────────────
+
+export interface Book {
+  id: string; filePath: string; type: 'book';
+  name: string; title: string;
+  logo?: { src: string; alt: string };
+  parts: Part[];
+}
+
+export interface Part {
+  id: string; filePath: string; type: 'part';
+  name: string; title: string;
+  chapters: Chapter[];
+  book: Book;
+}
+
+export interface Chapter {
+  id: string; filePath: string; type: 'chapter';
+  name: string; title: string;
+  thumbnail?: { src: string; alt: string };
+  references: Reference[];
+  abstract: ContentBlock[];
+  prerequisiteWarning: ContentBlock[];
+  prologue: ContentBlock[];
+  sections: Section[];
+  epilogue: ContentBlock[];
+  part: Part;
+}
+
+export interface Section {
+  id: string; filePath: string; type: 'section';
+  name: string; title: string;
+  references: Reference[];
+  body: ContentBlock[];
+  chapter: Chapter;
+}
+
+// ─── Knowledge base ───────────────────────────────────────────────────────────
+
+export interface Namespace {
+  id: string; filePath: string | null; type: 'namespace';
+  name: string; title: string;
+  subNamespaces: Namespace[];
+  definitions: Definition[];
+  theorems: Theorem[];
+  proofs: Proof[];
+  remarks: Remark[];
+  parent: Namespace | null;
+}
+
+export interface Definition {
+  id: string; filePath: string; type: 'definition';
+  name: string; namespacePath: string;
+  title?: string; labels?: Labels;
+  terms: Term[];
+  references: Reference[];
+  body: ContentBlock[];
+  remarks: Remark[];
+  namespace: Namespace;
+}
+
+export interface Theorem {
+  id: string; filePath: string; type: 'theorem';
+  name: string; namespacePath: string;
+  title?: string; labels?: Labels;
+  terms: Term[];
+  references: Reference[];
+  body: ContentBlock[];
+  proofs: Proof[];
+  remarks: Remark[];
+  namespace: Namespace;
+}
+
+export interface Proof {
+  id: string; filePath: string; type: 'proof';
+  name: string; namespacePath: string;
+  references: Reference[];
+  body: ContentBlock[];
+  remarks: Remark[];
+  namespace: Namespace;
+}
+
+export interface Remark {
+  id: string; filePath: string; type: 'remark';
+  name: string; namespacePath: string;
+  terms: Term[];
+  references: Reference[];
+  body: ContentBlock[];
+  namespace: Namespace;
+}
+
+// ─── Top-level container ──────────────────────────────────────────────────────
+
+export interface LoadedContent {
+  books: Book[];
+  kb: Namespace[];
+  /** Maps IDs of file-backed objects to their YAML file paths. */
+  idToFilePath: Map<string, string>;
+  /** Maps YAML file paths to the IDs of their corresponding objects. */
+  filePathToId: Map<string, string>;
+  /** Maps all object IDs (including inline objects) to their objects. */
+  idToObject: Map<string, unknown>;
+}
