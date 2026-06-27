@@ -1,0 +1,18 @@
+# Source & build inputs — not needed in the packaged VSIX (out/ and media/*.js ship instead)
+src/**
+media/src/**
+scripts/**
+docs/**
+.github/**
+
+# Configs & metadata
+tsconfig.json
+.gitignore
+.vscodeignore
+.vscode/**
+
+# Source maps
+**/*.map
+
+# VSIX artifacts
+*.vsix
