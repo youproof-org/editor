@@ -4,4 +4,4 @@ media/panel.js
 media/panel.js.map
 media/editor.js
 media/editor.js.map
-.needs-reload
+*.vsix
