@@ -67,9 +67,25 @@ if (capture('git status --porcelain') !== '') {
   fail('working tree is dirty. Commit or stash your changes before releasing.');
 }
 
-// ─── 4. Duplicate-version guard ────────────────────────────────────────────────
+// ─── 4. In-sync-with-origin guard ──────────────────────────────────────────────
+// Refresh origin's branch refs and tags, then require HEAD to match
+// origin/stable/released so we never release a commit that isn't on the official
+// remote branch (the tag push alone would not advance the branch ref).
 
-run('git fetch --tags --quiet');
+run('git fetch origin --tags --quiet');
+
+let remoteHead;
+try {
+  remoteHead = capture(`git rev-parse origin/${RELEASE_BRANCH}`);
+} catch {
+  fail(`origin/${RELEASE_BRANCH} not found — push the branch first.`);
+}
+if (capture('git rev-parse HEAD') !== remoteHead) {
+  fail(`HEAD is not in sync with origin/${RELEASE_BRANCH}. Push (and merge) your commits first.`);
+}
+
+// ─── 5. Duplicate-version guard ────────────────────────────────────────────────
+
 const existingTags = capture('git tag --list').split('\n');
 if (existingTags.includes(tag)) {
   fail(`tag "${tag}" already exists. Bump the version in package.json.`);
@@ -82,12 +98,12 @@ try {
   // Re-throw only if it was our own fail() that called process.exit (it won't reach here).
 }
 
-// ─── 5. Build ──────────────────────────────────────────────────────────────────
+// ─── 6. Build ──────────────────────────────────────────────────────────────────
 
 console.log(`release: building ${tag}…`);
 run('npm run build');
 
-// ─── 6. Package VSIX (with temporary name/publisher swap) ──────────────────────
+// ─── 7. Package VSIX (with temporary name/publisher swap) ──────────────────────
 
 console.log('release: packaging VSIX…');
 try {
@@ -99,13 +115,13 @@ try {
   fs.writeFileSync(pkgPath, originalPkgText);
 }
 
-// ─── 7. Tag the current commit ─────────────────────────────────────────────────
+// ─── 8. Tag the current commit ─────────────────────────────────────────────────
 
 console.log(`release: tagging ${tag}…`);
 execFileSync('git', ['tag', tag], { cwd: extensionDir, stdio: 'inherit' });
 execFileSync('git', ['push', 'origin', tag], { cwd: extensionDir, stdio: 'inherit' });
 
-// ─── 8. Publish GitHub Release ─────────────────────────────────────────────────
+// ─── 9. Publish GitHub Release ─────────────────────────────────────────────────
 
 console.log('release: creating GitHub release…');
 const head = capture('git rev-parse HEAD');
