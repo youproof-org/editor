@@ -500,7 +500,12 @@ function saveFromModel(id: string, content: LoadedContent): void {
   const obj  = content.idToObject.get(id) as WireBlock;
   const type = obj['type'] as string;
 
-  const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+  // CORE_SCHEMA (not DEFAULT): keep YAML timestamps like `published-at:
+  // 2020-03-29 22:17:00` as plain STRINGS so they round-trip verbatim. Under the
+  // default schema js-yaml parses them into Date objects, which normalizeStrings
+  // then flattens to `{}` (a Date has no enumerable own keys) — corrupting the
+  // field on save.
+  const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
@@ -584,13 +589,21 @@ function saveFromModel(id: string, content: LoadedContent): void {
   ));
 }
 
+// Key order per type — keeps saved YAML stable instead of appending keys. The
+// localization fields (`slug`, `locale`) and the chapter migration/listing fields
+// (`excerpt`, `published-at`, `legacy-path`) are included so they stay in place on
+// save (they are read from / written back verbatim, not modelled). `locale`
+// follows `name`; addressable types (chapter/section) also carry `slug`. Keys not
+// listed are still preserved — appended after these — but list everything the
+// content emits so nothing moves.
 const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'title', 'remarks', 'references', 'body'],
-  remark:     ['type', 'name', 'title', 'terms', 'references', 'body'],
-  section:    ['type', 'name', 'title', 'references', 'body'],
-  chapter:    ['type', 'name', 'title', 'thumbnail', 'references',
+  definition: ['type', 'name', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
+  theorem:    ['type', 'name', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'references', 'body'],
+  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
+  section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
+  chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
+               'thumbnail', 'references',
                'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
 };
 
