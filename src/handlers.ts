@@ -6,6 +6,7 @@ import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
 import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
 import { normalizeStrings } from './content/normalize';
+import { LOCALES } from './content/locales';
 import type {
   ContentTreeItem,
   ContentTargetObject,
@@ -31,6 +32,7 @@ import type {
   GetContentTreeResponse,
   GetContentObjectResponse,
   ReloadModelResponse,
+  ReloadModelRequest,
 } from './protocol/contentTypes';
 
 // ─── Handler context ──────────────────────────────────────────────────────────
@@ -43,16 +45,24 @@ export interface HandlerContext {
   getSelectedId:     () => string | null;
   setSelectedId:     (id: string | null) => void;
   resetContentCache: () => void;
+  getActiveLocale:   () => string;
+  setActiveLocale:   (locale: string) => void;
 }
 
 // ─── Handler registration ─────────────────────────────────────────────────────
 
 export function registerHandlers(ctx: HandlerContext): void {
-  const { server, panelManager, getContent, getSelectedId, setSelectedId, resetContentCache } = ctx;
+  const { server, panelManager, getContent, getSelectedId, setSelectedId, resetContentCache,
+          getActiveLocale, setActiveLocale } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
-    return { ...buildContentTree(getContent()), selectedId: getSelectedId() };
+    return {
+      ...buildContentTree(getContent()),
+      selectedId: getSelectedId(),
+      locales: LOCALES,
+      activeLocale: getActiveLocale(),
+    };
   });
 
   server.onRequest('getContentObject', async (params): Promise<GetContentObjectResponse> => {
@@ -223,7 +233,13 @@ export function registerHandlers(ctx: HandlerContext): void {
     return {};
   });
 
-  server.onRequest('reloadModel', async (): Promise<ReloadModelResponse> => {
+  server.onRequest('reloadModel', async (params): Promise<ReloadModelResponse> => {
+    const p = (params ?? {}) as ReloadModelRequest;
+    // Switch to the requested locale when valid; otherwise reload the current one.
+    // The editor holds exactly one locale at a time, so a locale switch discards
+    // and rebuilds the whole model (below).
+    const targetLocale = p.locale && LOCALES.includes(p.locale) ? p.locale : getActiveLocale();
+
     const content  = getContent();
     const allIds   = [...content.idToFilePath.keys()];
     const dirtyIds = allIds.filter(id => panelManager.isDirty(id));
@@ -232,10 +248,16 @@ export function registerHandlers(ctx: HandlerContext): void {
         const obj = content.idToObject.get(id) as Record<string, unknown> | undefined;
         return (obj?.['title'] as string | undefined) ?? (obj?.['name'] as string | undefined) ?? id;
       });
+      const action = targetLocale !== getActiveLocale() ? 'switching locale' : 'reloading';
       vscode.window.showErrorMessage(
-        `Save or discard unsaved changes before reloading: ${labels.join(', ')}`,
+        `Save or discard unsaved changes before ${action}: ${labels.join(', ')}`,
       );
-      return { ...buildContentTree(content), selectedId: getSelectedId() };
+      return {
+        ...buildContentTree(content),
+        selectedId: getSelectedId(),
+        locales: LOCALES,
+        activeLocale: getActiveLocale(),
+      };
     }
 
     const openIds = panelManager.closeAll();
@@ -249,6 +271,8 @@ export function registerHandlers(ctx: HandlerContext): void {
       .map(id => content.idToFilePath.get(id))
       .filter((fp): fp is string => fp !== undefined);
 
+    // Apply the (possibly new) locale before rebuilding the model.
+    setActiveLocale(targetLocale);
     resetContentCache();
     const newContent = getContent();
 
@@ -272,7 +296,12 @@ export function registerHandlers(ctx: HandlerContext): void {
 
     if (newSelectedId) panelManager.focusWhenReady(newSelectedId);
 
-    return { ...buildContentTree(newContent), selectedId: newSelectedId };
+    return {
+      ...buildContentTree(newContent),
+      selectedId: newSelectedId,
+      locales: LOCALES,
+      activeLocale: getActiveLocale(),
+    };
   });
 
   server.onRequest('setContentObjectDirty', async (params) => {
@@ -471,7 +500,12 @@ function saveFromModel(id: string, content: LoadedContent): void {
   const obj  = content.idToObject.get(id) as WireBlock;
   const type = obj['type'] as string;
 
-  const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+  // CORE_SCHEMA (not DEFAULT): keep YAML timestamps like `published-at:
+  // 2020-03-29 22:17:00` as plain STRINGS so they round-trip verbatim. Under the
+  // default schema js-yaml parses them into Date objects, which normalizeStrings
+  // then flattens to `{}` (a Date has no enumerable own keys) — corrupting the
+  // field on save.
+  const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
@@ -555,13 +589,21 @@ function saveFromModel(id: string, content: LoadedContent): void {
   ));
 }
 
+// Key order per type — keeps saved YAML stable instead of appending keys. The
+// localization fields (`slug`, `locale`) and the chapter migration/listing fields
+// (`excerpt`, `published-at`, `legacy-path`) are included so they stay in place on
+// save (they are read from / written back verbatim, not modelled). `locale`
+// follows `name`; addressable types (chapter/section) also carry `slug`. Keys not
+// listed are still preserved — appended after these — but list everything the
+// content emits so nothing moves.
 const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'title', 'remarks', 'references', 'body'],
-  remark:     ['type', 'name', 'title', 'terms', 'references', 'body'],
-  section:    ['type', 'name', 'title', 'references', 'body'],
-  chapter:    ['type', 'name', 'title', 'thumbnail', 'references',
+  definition: ['type', 'name', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
+  theorem:    ['type', 'name', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'references', 'body'],
+  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
+  section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
+  chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
+               'thumbnail', 'references',
                'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
 };
 
@@ -854,7 +896,7 @@ function buildTargetObjects(rawRefs: unknown[], blocks: unknown[], content: Load
 
 // ─── Content tree builder ─────────────────────────────────────────────────────
 
-export function buildContentTree(content: LoadedContent): Omit<GetContentTreeResponse, 'selectedId'> {
+export function buildContentTree(content: LoadedContent): Pick<GetContentTreeResponse, 'books' | 'kb'> {
   function group(id: string, label: string, children: ContentTreeItem[]): ContentTreeItem {
     return { id, type: 'group', label, isFileBacked: false, children };
   }

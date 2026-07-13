@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import TreePanel from './TreePanel';
 import { useClient } from '../shared/clientContext';
-import type { ContentTreeItem, GetContentTreeResponse, ReloadModelResponse, SaveRecursivelyRequest, EndSelectTargetRequest } from '../shared/types';
+import type { ContentTreeItem, GetContentTreeResponse, ReloadModelResponse, ReloadModelRequest, SaveRecursivelyRequest, EndSelectTargetRequest } from '../shared/types';
 
 function toggleSet(set: Set<string>, id: string): Set<string> {
   const next = new Set(set);
@@ -55,6 +55,8 @@ export default function App() {
   const [error, setError]           = useState<string | null>(null);
   const [ctxMenu, setCtxMenu]       = useState<{ x: number; y: number; node: ContentTreeItem } | null>(null);
   const [allowedSelectionTypes, setAllowedSelectionTypes] = useState<string[] | null>(null);
+  const [locales, setLocales]       = useState<string[]>([]);
+  const [activeLocale, setActiveLocale] = useState<string>('');
 
   const nodesRef    = useRef<ContentTreeItem[]>([]);  nodesRef.current    = nodes;
   const expandedRef = useRef<Set<string>>(new Set()); expandedRef.current = expanded;
@@ -77,6 +79,8 @@ export default function App() {
     setNodes(newNodes);
     setExpanded(newExpanded);
     setSelectedId(data.selectedId);
+    setLocales(data.locales);
+    setActiveLocale(data.activeLocale);
     expandAncestors(newNodes, data.selectedId);
     setError(null);
   }
@@ -151,8 +155,8 @@ export default function App() {
     client.request('endSelectTarget', { targetId: node.id } as EndSelectTargetRequest).catch(console.error);
   }
 
-  function handleReloadModel(): void {
-    client.request<ReloadModelResponse>('reloadModel')
+  function handleReloadModel(locale?: string): void {
+    client.request<ReloadModelResponse>('reloadModel', { locale } as ReloadModelRequest)
       .then(data => applyTreeData(data))
       .catch((err: Error) => setError(err.message));
   }
@@ -185,7 +189,20 @@ export default function App() {
               onClick={() => client.request('endSelectTarget', { targetId: null } as EndSelectTargetRequest).catch(console.error)}>
               Cancel select target
             </button>
-          : <button className="reload-model-btn" onClick={handleReloadModel}>Reload model</button>
+          : <div className="reload-model-buttons">
+              {locales.map(loc => (
+                <button
+                  key={loc}
+                  className={`reload-model-btn${loc === activeLocale ? ' active' : ''}`}
+                  onClick={() => handleReloadModel(loc)}
+                  title={loc === activeLocale
+                    ? `Reload ${loc.toUpperCase()} (active locale)`
+                    : `Switch to and load ${loc.toUpperCase()}`}
+                >
+                  Reload {loc.toUpperCase()}
+                </button>
+              ))}
+            </div>
         }
       </div>
       {ctxMenu && (

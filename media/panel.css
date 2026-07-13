@@ -220,6 +220,24 @@ body {
   background: var(--vscode-list-hoverBackground);
 }
 
+/* One reload button per configured locale, laid out in a row. */
+.reload-model-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.reload-model-buttons .reload-model-btn {
+  flex: 1;
+}
+
+/* The locale currently loaded in the model. */
+.reload-model-btn.active {
+  border-color: var(--vscode-focusBorder);
+  background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+  font-weight: 600;
+}
+
 .cancel-select-target-btn {
   border-color: var(--vscode-focusBorder);
   color: var(--vscode-focusBorder);

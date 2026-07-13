@@ -83,23 +83,30 @@ export type ContentBlock =
 
 // ─── Book hierarchy ───────────────────────────────────────────────────────────
 
+// NOTE: `locale` mirrors the shared content schema (services:
+// apps/website/lib/content/types.ts). It is modelled here because the editor
+// loads/edits exactly one locale at a time (see loader.ts's locale filter). The
+// addressable types also carry a `slug` in the YAML; the editor does not build
+// URLs, so `slug` is intentionally NOT modelled — it is preserved untouched on
+// save (saveFromModel merges into the loaded YAML rather than reconstructing it).
+
 export interface Book {
   id: string; filePath: string; type: 'book';
-  name: string; title: string;
+  name: string; title: string; locale: string;
   logo?: { src: string; alt: string };
   parts: Part[];
 }
 
 export interface Part {
   id: string; filePath: string; type: 'part';
-  name: string; title: string;
+  name: string; title: string; locale: string;
   chapters: Chapter[];
   book: Book;
 }
 
 export interface Chapter {
   id: string; filePath: string; type: 'chapter';
-  name: string; title: string;
+  name: string; title: string; locale: string;
   thumbnail?: { src: string; alt: string };
   references: Reference[];
   abstract: ContentBlock[];
@@ -112,7 +119,7 @@ export interface Chapter {
 
 export interface Section {
   id: string; filePath: string; type: 'section';
-  name: string; title: string;
+  name: string; title: string; locale: string;
   references: Reference[];
   body: ContentBlock[];
   chapter: Chapter;
@@ -122,7 +129,7 @@ export interface Section {
 
 export interface Namespace {
   id: string; filePath: string | null; type: 'namespace';
-  name: string; title: string;
+  name: string; title: string; locale: string;
   subNamespaces: Namespace[];
   definitions: Definition[];
   theorems: Theorem[];
@@ -133,7 +140,7 @@ export interface Namespace {
 
 export interface Definition {
   id: string; filePath: string; type: 'definition';
-  name: string; namespacePath: string;
+  name: string; namespacePath: string; locale: string;
   title?: string; labels?: Labels;
   terms: Term[];
   references: Reference[];
@@ -144,7 +151,7 @@ export interface Definition {
 
 export interface Theorem {
   id: string; filePath: string; type: 'theorem';
-  name: string; namespacePath: string;
+  name: string; namespacePath: string; locale: string;
   title?: string; labels?: Labels;
   terms: Term[];
   references: Reference[];
@@ -156,7 +163,7 @@ export interface Theorem {
 
 export interface Proof {
   id: string; filePath: string; type: 'proof';
-  name: string; namespacePath: string;
+  name: string; namespacePath: string; locale: string;
   references: Reference[];
   body: ContentBlock[];
   remarks: Remark[];
@@ -165,7 +172,7 @@ export interface Proof {
 
 export interface Remark {
   id: string; filePath: string; type: 'remark';
-  name: string; namespacePath: string;
+  name: string; namespacePath: string; locale: string;
   terms: Term[];
   references: Reference[];
   body: ContentBlock[];

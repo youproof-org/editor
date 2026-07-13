@@ -1,6 +1,10 @@
 export function normalizeStrings(value: unknown): unknown {
   if (typeof value === 'string') return value.replace(/\n+/g, ' ').trim();
   if (Array.isArray(value)) return value.map(normalizeStrings);
+  // Non-plain objects (e.g. a Date from a YAML timestamp) have no enumerable own
+  // keys, so the object branch below would flatten them to `{}`. Pass them through
+  // untouched. (saveFromModel also loads with CORE_SCHEMA to avoid Dates entirely.)
+  if (value instanceof Date) return value;
   if (value !== null && typeof value === 'object') {
     const obj = value as Record<string, unknown>;
     const blockType = obj['type'];

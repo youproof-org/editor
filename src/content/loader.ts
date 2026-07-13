@@ -11,6 +11,7 @@ import type {
   Labels, LabelCase,
 } from './model';
 import { normalizeStrings } from './normalize';
+import { DEFAULT_LOCALE } from './locales';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
 
@@ -18,6 +19,13 @@ import { maskFormulas } from '../protocol/formula';
 
 function genId(): string {
   return Math.random().toString().slice(2, 18).padEnd(16, '0');
+}
+
+// A content file's locale: its `locale` field, else the default locale (so files
+// predating the locale migration still load under the default).
+function localeOf(data: Record<string, unknown>): string {
+  const v = data['locale'];
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : DEFAULT_LOCALE;
 }
 
 // ─── Canonical key helpers (match website/lib/content/graph.ts) ───────────────
@@ -30,7 +38,12 @@ function sectionKey(b: string, p: string, c: string, s: string) { return `/books
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function loadContent(contentRoot: string): LoadedContent {
+// Loads exactly ONE locale's content: every file-backed object whose `locale`
+// matches (book/namespace subtrees and KB entities in other locales are skipped),
+// so the in-memory model never mixes locales. A locale with no content yields an
+// empty model (no error) — that's what makes the per-locale reload buttons
+// forward-compatible before other locales exist.
+export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE): LoadedContent {
   const idToFilePath = new Map<string, string>();
   const filePathToId = new Map<string, string>();
   const idToObject   = new Map<string, unknown>();
@@ -261,10 +274,11 @@ export function loadContent(contentRoot: string): LoadedContent {
     const bookYaml = path.join(bookDir, 'book.yaml');
     try {
       const data = readYaml(bookYaml);
+      if (localeOf(data) !== locale) return null; // book (and its subtree) belongs to another locale
       const id   = genId();
       const book: Book = {
         id, filePath: bookYaml, type: 'book',
-        name: bookName, title: str(data, 'title', bookName),
+        name: bookName, title: str(data, 'title', bookName), locale: localeOf(data),
         logo: parseLogo(data['logo']), parts: [],
       };
       registerFile(id, bookYaml); reg(id, book); regRef(bookKey(bookName), id);
@@ -284,7 +298,7 @@ export function loadContent(contentRoot: string): LoadedContent {
       const id   = genId();
       const part: Part = {
         id, filePath: partYaml, type: 'part',
-        name: partName, title: str(data, 'title', partName),
+        name: partName, title: str(data, 'title', partName), locale: localeOf(data),
         chapters: [], book,
       };
       registerFile(id, partYaml); reg(id, part); regRef(partKey(bookName, partName), id);
@@ -306,7 +320,7 @@ export function loadContent(contentRoot: string): LoadedContent {
       const id   = genId();
       const chapter: Chapter = {
         id, filePath: chapterYaml, type: 'chapter',
-        name: chapterName, title: str(data, 'title', chapterName),
+        name: chapterName, title: str(data, 'title', chapterName), locale: localeOf(data),
         thumbnail: parseLogo(data['thumbnail']),
         references: [], abstract: [], prerequisiteWarning: [],
         prologue: [], sections: [], epilogue: [], part,
@@ -337,7 +351,7 @@ export function loadContent(contentRoot: string): LoadedContent {
       const id   = genId();
       const section: Section = {
         id, filePath: sectionFile, type: 'section',
-        name: sectionName, title: str(data, 'title', sectionName),
+        name: sectionName, title: str(data, 'title', sectionName), locale: localeOf(data),
         references: [], body: [], chapter,
       };
       registerFile(id, sectionFile); reg(id, section); regRef(sectionKey(bookName, partName, chapterName, sectionName), id);
@@ -367,6 +381,9 @@ export function loadContent(contentRoot: string): LoadedContent {
       let name     = path.basename(nsDir).replace(/^\d+-/, '');
       let title    = name;
       let nsFilePath: string | null = null;
+      // Fileless (purely structural) namespaces adopt the active locale; a
+      // file-backed one takes its own `locale` (default locale if unset).
+      let nsLocale = locale;
 
       if (fs.existsSync(nsYaml)) {
         try {
@@ -374,14 +391,19 @@ export function loadContent(contentRoot: string): LoadedContent {
           name       = str(data, 'name', name);
           title      = str(data, 'title', name);
           nsFilePath = nsYaml;
+          nsLocale   = localeOf(data);
         } catch { /* keep defaults */ }
       }
+
+      // A file-backed namespace in another locale is not part of this model —
+      // skip its whole subtree.
+      if (nsFilePath && nsLocale !== locale) return null;
 
       const nsPath = `${parentNsPath}/${name}`;
       const id     = genId();
       const ns: Namespace = {
         id, filePath: nsFilePath, type: 'namespace',
-        name, title,
+        name, title, locale: nsLocale,
         subNamespaces: [], definitions: [], theorems: [], proofs: [], remarks: [],
         parent: parentNs,
       };
@@ -435,13 +457,14 @@ export function loadContent(contentRoot: string): LoadedContent {
   ): Definition | Theorem | Proof | Remark | null {
     try {
       const data = readYaml(filePath);
+      if (localeOf(data) !== locale) return null; // entity belongs to another locale
       const name = str(data, 'name', path.basename(filePath, '.yaml').replace(/^\d+-/, ''));
       const id   = genId();
       const key  = entityKey(nsPath, name);
 
       if (folder === 'definitions') {
         const def: Definition = {
-          id, filePath, type: 'definition', name, namespacePath: nsPath,
+          id, filePath, type: 'definition', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
           labels: parseLabels(data['labels']),
           terms: [], references: [], body: [], remarks: [], namespace,
@@ -459,7 +482,7 @@ export function loadContent(contentRoot: string): LoadedContent {
 
       if (folder === 'theorems') {
         const thm: Theorem = {
-          id, filePath, type: 'theorem', name, namespacePath: nsPath,
+          id, filePath, type: 'theorem', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
           labels: parseLabels(data['labels']),
           terms: [], references: [], body: [], proofs: [], remarks: [], namespace,
@@ -478,7 +501,7 @@ export function loadContent(contentRoot: string): LoadedContent {
 
       if (folder === 'proofs') {
         const proof: Proof = {
-          id, filePath, type: 'proof', name, namespacePath: nsPath,
+          id, filePath, type: 'proof', name, namespacePath: nsPath, locale: localeOf(data),
           references: [], body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, proof); regRef(key, id);
@@ -491,7 +514,7 @@ export function loadContent(contentRoot: string): LoadedContent {
 
       // remarks
       const rem: Remark = {
-        id, filePath, type: 'remark', name, namespacePath: nsPath,
+        id, filePath, type: 'remark', name, namespacePath: nsPath, locale: localeOf(data),
         terms: [], references: [], body: [], namespace,
       };
       registerFile(id, filePath); reg(id, rem); regRef(key, id);
