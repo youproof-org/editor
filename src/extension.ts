@@ -3,6 +3,7 @@ import { MessageServer } from './protocol/messageServer';
 import { SidebarProvider } from './views/sidebarProvider';
 import { PanelManager } from './views/panelManager';
 import { loadContent } from './content/loader';
+import { DEFAULT_LOCALE } from './content/locales';
 import type { LoadedContent } from './content/model';
 import { registerHandlers, resolveContentRoot } from './handlers';
 
@@ -12,9 +13,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const server = new MessageServer();
   let contentCache: LoadedContent | null = null;
   let selectedId: string | null = null;
+  // The editor loads exactly one locale at a time; DEFAULT_LOCALE on startup,
+  // switched by the per-locale reload buttons (see the reloadModel handler).
+  let activeLocale = DEFAULT_LOCALE;
 
   function getContent(): LoadedContent {
-    if (!contentCache) contentCache = loadContent(resolveContentRoot(context));
+    if (!contentCache) contentCache = loadContent(resolveContentRoot(context), activeLocale);
     return contentCache;
   }
 
@@ -33,6 +37,8 @@ export function activate(context: vscode.ExtensionContext): void {
     getSelectedId:     () => selectedId,
     setSelectedId:     (id) => { selectedId = id; },
     resetContentCache: () => { contentCache = null; },
+    getActiveLocale:   () => activeLocale,
+    setActiveLocale:   (l) => { activeLocale = l; },
   });
 
   context.subscriptions.push(
