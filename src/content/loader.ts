@@ -15,6 +15,14 @@ import { DEFAULT_LOCALE } from './locales';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
 
+// Structural YAML files (a directory's own content object) — excluded when
+// scanning a directory for child section files, which are matched by `name`.
+const STRUCTURAL_YAML_FILES = new Set([
+  'book.yaml', 'part.yaml', 'chapter.yaml',
+  'article.yaml', 'newsletter.yaml', 'page.yaml', 'landing.yaml',
+  'namespace.yaml',
+]);
+
 // ─── ID generation ────────────────────────────────────────────────────────────
 
 function genId(): string {
@@ -81,24 +89,31 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
     return Array.isArray(normalized) ? (normalized as unknown[]).map(String) : [];
   }
 
-  function findChildDir(parentDir: string, name: string): string | null {
+  // Directory/file resolution keys off the YAML `name` field, never the folder
+  // or file basename (which may carry an NN- ordering prefix). Folder names on
+  // disk are arbitrary; only `name` is authoritative — mirrors the services
+  // graph.ts / gen-manifest.mjs behaviour.
+  function findChildDir(parentDir: string, name: string, childYaml: string): string | null {
     let entries: string[];
     try { entries = fs.readdirSync(parentDir); } catch { return null; }
-    const match = entries.find(e => {
-      if (!fs.statSync(path.join(parentDir, e)).isDirectory()) return false;
-      return e === name || e.replace(/^\d+-/, '') === name;
-    });
-    return match ? path.join(parentDir, match) : null;
+    for (const e of entries) {
+      const dir = path.join(parentDir, e);
+      try { if (!fs.statSync(dir).isDirectory()) continue; } catch { continue; }
+      const yamlPath = path.join(dir, childYaml);
+      if (!fs.existsSync(yamlPath)) continue;
+      if (readYaml(yamlPath)['name'] === name) return dir;
+    }
+    return null;
   }
 
   function findChildFile(dir: string, name: string): string | null {
     let entries: string[];
     try { entries = fs.readdirSync(dir); } catch { return null; }
-    const match = entries.find(e => {
-      if (!e.endsWith('.yaml')) return false;
-      return e.replace(/^\d+-/, '').slice(0, -5) === name;
-    });
-    return match ? path.join(dir, match) : null;
+    for (const e of entries) {
+      if (!e.endsWith('.yaml') || STRUCTURAL_YAML_FILES.has(e)) continue;
+      if (readYaml(path.join(dir, e))['name'] === name) return path.join(dir, e);
+    }
+    return null;
   }
 
   function str(obj: Record<string, unknown>, key: string, fb: string): string {
@@ -290,7 +305,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
   }
 
   function loadPart(bookDir: string, partName: string, bookName: string, book: Book): Part | null {
-    const partDir  = findChildDir(bookDir, partName);
+    const partDir  = findChildDir(bookDir, partName, 'part.yaml');
     if (!partDir) return null;
     const partYaml = path.join(partDir, 'part.yaml');
     try {
@@ -312,7 +327,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
   function loadChapter(
     partDir: string, chapterName: string, partName: string, bookName: string, part: Part,
   ): Chapter | null {
-    const chapterDir  = findChildDir(partDir, chapterName);
+    const chapterDir  = findChildDir(partDir, chapterName, 'chapter.yaml');
     if (!chapterDir) return null;
     const chapterYaml = path.join(chapterDir, 'chapter.yaml');
     try {

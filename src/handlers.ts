@@ -590,12 +590,15 @@ function saveFromModel(id: string, content: LoadedContent): void {
 }
 
 // Key order per type — keeps saved YAML stable instead of appending keys. The
-// localization fields (`slug`, `locale`) and the chapter migration/listing fields
-// (`excerpt`, `published-at`, `legacy-path`) are included so they stay in place on
-// save (they are read from / written back verbatim, not modelled). `locale`
-// follows `name`; addressable types (chapter/section) also carry `slug`. Keys not
-// listed are still preserved — appended after these — but list everything the
-// content emits so nothing moves.
+// localization fields (`slug`, `locale`), the chapter migration/listing fields
+// (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
+// (`meta`) are included so they stay in place on save (read from / written back
+// verbatim, not modelled). `locale` follows `name`; addressable types
+// (chapter/section) also carry `slug`. Keys not listed are still preserved —
+// appended after these — but list everything the content emits so nothing moves.
+// Types with NO entry here (book, article, newsletter, page, landing) are left
+// untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
+// position; add an entry when the editor gains a UI for those types.
 const CANONICAL_ORDER: Record<string, string[]> = {
   definition: ['type', 'name', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
   theorem:    ['type', 'name', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
@@ -603,7 +606,7 @@ const CANONICAL_ORDER: Record<string, string[]> = {
   remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
-               'thumbnail', 'references',
+               'meta', 'thumbnail', 'references',
                'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
 };
 
