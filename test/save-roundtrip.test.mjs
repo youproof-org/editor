@@ -1,0 +1,198 @@
+// Round-trip guard for the editor's YAML writer.
+//
+// The knowledge base now carries public per-node URLs, so entity, `claim` and
+// `terms` entries all gained a `slug` that the editor does NOT model. Claims and
+// terms are reconstructed field by field on save, so without explicit carry-over
+// the first save in the editor silently deletes their slug — that is the
+// regression this file exists to catch. It also pins two neighbouring
+// invariants: a proof's `terms` block survives (the model has no `Proof.terms`,
+// so an empty model must not be read as "delete"), and saving is idempotent.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import Module from 'node:module'
+import yaml from 'js-yaml'
+
+// handlers.js requires 'vscode', which only resolves inside the extension host.
+// Nothing under test touches it, so a bare stub is enough.
+const realLoad = Module._load
+Module._load = function (request, ...rest) {
+  if (request === 'vscode') return {}
+  return realLoad.call(this, request, ...rest)
+}
+
+const { saveFromModel } = await import('../out/handlers.js')
+const { loadContent } = await import('../out/content/loader.js')
+
+const NS = 'namespace.yaml'
+
+function fixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'yp-editor-'))
+  const ns = path.join(root, 'knowledge-base', 'proba')
+  for (const d of ['definitions', 'theorems', 'proofs', 'remarks']) {
+    mkdirSync(path.join(ns, d), { recursive: true })
+  }
+  const w = (rel, body) => writeFileSync(path.join(ns, rel), body)
+
+  writeFileSync(path.join(ns, NS), 'type: namespace\nname: proba\nlocale: hu\ntitle: Próba\n')
+
+  // definition: entity slug + two term slugs + two claim slugs, one claim nested
+  // inside a subsection (claims are collected recursively).
+  w('definitions/proba-definicio.yaml', `type: definition
+name: proba-definicio
+slug: proba-definicio
+locale: hu
+title: Próba definíció
+remarks:
+  - proba-megjegyzes
+terms:
+  first-term:
+    slug: elso-fogalom
+    display: "[első fogalom]"
+    canonical: első fogalom
+  second-term:
+    slug: masodik-fogalom
+    display: "[második fogalom]"
+    canonical: második fogalom
+references: {}
+body:
+  - type: narrative
+    content: Bevezető [[first-term]] szöveg.
+  - type: claim
+    name: top-level-claim
+    slug: legfelso-allitas
+    content: Egy állítás.
+  - type: subsection
+    title: Alszakasz
+    blocks:
+      - type: narrative
+        content: Beágyazott [[second-term]] szöveg.
+      - type: claim
+        name: nested-claim
+        slug: beagyazott-allitas
+        content: Beágyazott állítás.
+`)
+
+  w('theorems/proba-tetel.yaml', `type: theorem
+name: proba-tetel
+slug: proba-tetel
+locale: hu
+title: Próba tétel
+proofs:
+  - proba-bizonyitas
+remarks: []
+references: {}
+body:
+  - type: narrative
+    content: Tétel szöveg.
+`)
+
+  // proof: terms + a claim, neither of which the model represents for a proof
+  w('proofs/proba-bizonyitas.yaml', `type: proof
+name: proba-bizonyitas
+slug: proba-bizonyitas
+locale: hu
+remarks: []
+terms:
+  proof-term:
+    slug: bizonyitas-fogalom
+    display: "[bizonyítás-fogalom]"
+    canonical: bizonyítás-fogalom
+references: {}
+body:
+  - type: narrative
+    content: Bizonyítás szöveg.
+  - type: claim
+    name: proof-claim
+    slug: bizonyitas-allitas
+    content: Bizonyításbeli állítás.
+`)
+
+  w('remarks/proba-megjegyzes.yaml', `type: remark
+name: proba-megjegyzes
+slug: proba-megjegyzes
+locale: hu
+terms:
+  remark-term:
+    slug: megjegyzes-fogalom
+    display: "[megjegyzés-fogalom]"
+    canonical: megjegyzés-fogalom
+references: {}
+body:
+  - type: narrative
+    content: Megjegyzés szöveg.
+`)
+  return root
+}
+
+/** Save every file-backed knowledge-base object, then return path -> text. */
+function saveAll(root) {
+  const content = loadContent(root, 'hu')
+  const files = {}
+  for (const [id, fp] of content.idToFilePath) {
+    if (!fp.includes(`${path.sep}knowledge-base${path.sep}`)) continue
+    if (path.basename(fp) === NS) continue
+    saveFromModel(id, content)
+    files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
+  }
+  return files
+}
+
+const doc = (text) => yaml.load(text)
+const claims = (blocks) =>
+  (blocks ?? []).flatMap((b) => (b?.type === 'claim' ? [b] : claims(b?.blocks)))
+
+test('entity, claim and term slugs survive a save', () => {
+  const root = fixture()
+  const files = saveAll(root)
+
+  const def = doc(files[path.join('knowledge-base', 'proba', 'definitions', 'proba-definicio.yaml')])
+  assert.equal(def.slug, 'proba-definicio', 'entity slug')
+  assert.equal(def.terms['first-term'].slug, 'elso-fogalom')
+  assert.equal(def.terms['second-term'].slug, 'masodik-fogalom')
+  const defClaims = Object.fromEntries(claims(def.body).map((c) => [c.name, c.slug]))
+  assert.deepEqual(defClaims, {
+    'top-level-claim': 'legfelso-allitas',
+    'nested-claim': 'beagyazott-allitas',
+  }, 'claim slugs, including one nested in a subsection')
+
+  const rem = doc(files[path.join('knowledge-base', 'proba', 'remarks', 'proba-megjegyzes.yaml')])
+  assert.equal(rem.slug, 'proba-megjegyzes')
+  assert.equal(rem.terms['remark-term'].slug, 'megjegyzes-fogalom')
+
+  const thm = doc(files[path.join('knowledge-base', 'proba', 'theorems', 'proba-tetel.yaml')])
+  assert.equal(thm.slug, 'proba-tetel')
+})
+
+test('a proof keeps its terms block, which the model does not represent', () => {
+  const root = fixture()
+  const files = saveAll(root)
+  const proof = doc(files[path.join('knowledge-base', 'proba', 'proofs', 'proba-bizonyitas.yaml')])
+
+  assert.ok(proof.terms, 'terms block must not be deleted')
+  assert.equal(proof.terms['proof-term'].slug, 'bizonyitas-fogalom')
+  assert.equal(proof.terms['proof-term'].canonical, 'bizonyítás-fogalom')
+  assert.equal(proof.slug, 'proba-bizonyitas')
+  assert.equal(claims(proof.body)[0].slug, 'bizonyitas-allitas')
+})
+
+test('slug keeps its position: immediately after name', () => {
+  const root = fixture()
+  const files = saveAll(root)
+  for (const [rel, text] of Object.entries(files)) {
+    const keys = Object.keys(doc(text))
+    assert.equal(keys[0], 'type', rel)
+    assert.equal(keys[1], 'name', rel)
+    assert.equal(keys[2], 'slug', rel)
+    assert.equal(keys[3], 'locale', rel)
+  }
+})
+
+test('saving is idempotent', () => {
+  const root = fixture()
+  const first = saveAll(root)
+  const second = saveAll(root)
+  assert.deepEqual(second, first, 'a second save must not change any byte')
+})

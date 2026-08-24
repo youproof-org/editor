@@ -502,7 +502,10 @@ function targetToYaml(
 // destroy such a block.
 const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
 
-function saveFromModel(id: string, content: LoadedContent): void {
+// Exported for the round-trip test (test/save-roundtrip.test.mjs), which asserts
+// that saving a knowledge-base file preserves the unmodelled `slug` fields and is
+// idempotent. Not part of the extension's public surface.
+export function saveFromModel(id: string, content: LoadedContent): void {
   const filePath = content.idToFilePath.get(id);
   if (!filePath) return;
 
