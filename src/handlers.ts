@@ -493,6 +493,15 @@ function targetToYaml(
   return undefined;
 }
 
+// Types whose `terms` map the model actually represents (see model.ts: `Proof`
+// has no `terms`). Only for these may an empty model mean "the author deleted the
+// terms" — for anything else the field simply isn't modelled, so it must be left
+// exactly as authored rather than deleted. Mirrors how `labels` below is only
+// rewritten for the two types that model it. Defining terms directly on a proof
+// is a planned content feature; without this guard the first save would silently
+// destroy such a block.
+const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
+
 function saveFromModel(id: string, content: LoadedContent): void {
   const filePath = content.idToFilePath.get(id);
   if (!filePath) return;
@@ -557,7 +566,7 @@ function saveFromModel(id: string, content: LoadedContent): void {
       termsYaml[name] = entry;
     }
     yamlDoc['terms'] = termsYaml;
-  } else {
+  } else if (TERM_BEARING_TYPES.includes(type)) {
     delete yamlDoc['terms'];
   }
 
