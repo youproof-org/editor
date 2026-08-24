@@ -507,6 +507,12 @@ function saveFromModel(id: string, content: LoadedContent): void {
   // field on save.
   const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
+  // Read the unmodelled `slug`s off the file BEFORE any field is rewritten below.
+  const claimSlugs = collectClaimSlugs(yamlDoc);
+  const origTerms = (yamlDoc['terms'] && typeof yamlDoc['terms'] === 'object' && !Array.isArray(yamlDoc['terms']))
+    ? yamlDoc['terms'] as Record<string, unknown>
+    : {};
+
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
       if (!Array.isArray(modelBlocks) || modelBlocks.length === 0) {
@@ -514,7 +520,7 @@ function saveFromModel(id: string, content: LoadedContent): void {
         return;
       }
       const orig = (yamlDoc[yamlField] ?? []) as WireBlock[];
-      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content);
+      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content, claimSlugs);
     };
     merge('abstract',             obj['abstract']            as WireBlock[]);
     merge('prerequisite-warning', obj['prerequisiteWarning'] as WireBlock[]);
@@ -524,7 +530,7 @@ function saveFromModel(id: string, content: LoadedContent): void {
     const modelBody = Array.isArray(obj['body']) ? obj['body'] as WireBlock[] : [];
     if (modelBody.length > 0) {
       const orig = (yamlDoc['body'] ?? []) as WireBlock[];
-      yamlDoc['body'] = mergeBlocks(orig, modelBody, content);
+      yamlDoc['body'] = mergeBlocks(orig, modelBody, content, claimSlugs);
     } else {
       delete yamlDoc['body'];
     }
@@ -534,12 +540,21 @@ function saveFromModel(id: string, content: LoadedContent): void {
   if (modelTermsArr.length > 0) {
     const termsYaml: Record<string, unknown> = {};
     for (const t of modelTermsArr) {
+      const name  = t['name'] as string;
       const entry: Record<string, unknown> = {};
+      // Unmodelled `slug`, carried over from the file keyed by the term name —
+      // same rule as claim slugs (see collectClaimSlugs). First key in the entry,
+      // since the map key is the term's name.
+      const prev = origTerms[name];
+      const slug = prev && typeof prev === 'object' && !Array.isArray(prev)
+        ? (prev as Record<string, unknown>)['slug']
+        : undefined;
+      if (typeof slug === 'string') entry['slug'] = slug;
       if (t['display'])   entry['display']   = t['display'];
       if (t['canonical']) entry['canonical'] = t['canonical'];
       if (Array.isArray(t['synonyms']) && (t['synonyms'] as unknown[]).length)
         entry['synonyms'] = t['synonyms'];
-      termsYaml[t['name'] as string] = entry;
+      termsYaml[name] = entry;
     }
     yamlDoc['terms'] = termsYaml;
   } else {
@@ -593,17 +608,18 @@ function saveFromModel(id: string, content: LoadedContent): void {
 // localization fields (`slug`, `locale`), the chapter migration/listing fields
 // (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
 // (`meta`) are included so they stay in place on save (read from / written back
-// verbatim, not modelled). `locale` follows `name`; addressable types
-// (chapter/section) also carry `slug`. Keys not listed are still preserved —
+// verbatim, not modelled). `slug` follows `name` and `locale` follows `slug`, on
+// every type that carries one — the knowledge-base types now do, since each of
+// them has its own public URL. Keys not listed are still preserved —
 // appended after these — but list everything the content emits so nothing moves.
 // Types with NO entry here (book, article, newsletter, page, landing) are left
 // untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
 // position; add an entry when the editor gains a UI for those types.
 const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'references', 'body'],
-  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
+  definition: ['type', 'name', 'slug', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
+  theorem:    ['type', 'name', 'slug', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'slug', 'locale', 'title', 'remarks', 'terms', 'references', 'body'],
+  remark:     ['type', 'name', 'slug', 'locale', 'title', 'terms', 'references', 'body'],
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
                'meta', 'thumbnail', 'references',
@@ -630,7 +646,42 @@ function blockHeader(wire: WireBlock, type: string): WireBlock {
   return r;
 }
 
-function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): WireBlock {
+/**
+ * Claim `slug`s (and term `slug`s, below) are authored in the content YAML but are
+ * deliberately NOT modelled — the editor has no UI for them (see model.ts). They
+ * must therefore be carried across a save from the file on disk.
+ *
+ * Keyed by the claim `name`, never by position: the editor lets an author insert,
+ * delete and reorder blocks, so an index-paired lookup would transplant a slug
+ * onto a different claim. A *renamed* claim legitimately loses its slug — the slug
+ * describes the claim's content, so a rename invalidates it, and re-deriving it is
+ * an authoring decision rather than something to guess here.
+ */
+function collectClaimSlugs(yamlDoc: Record<string, unknown>): Map<string, string> {
+  const slugs = new Map<string, string>();
+  const walk = (blocks: unknown): void => {
+    if (!Array.isArray(blocks)) return;
+    for (const b of blocks) {
+      if (!b || typeof b !== 'object') continue;
+      const blk = b as Record<string, unknown>;
+      if (blk['type'] === 'claim' && typeof blk['name'] === 'string' && typeof blk['slug'] === 'string') {
+        slugs.set(blk['name'], blk['slug']);
+      }
+      walk(blk['blocks']);
+    }
+  };
+  for (const field of ['body', 'abstract', 'prerequisite-warning', 'prologue', 'epilogue']) {
+    walk(yamlDoc[field]);
+  }
+  return slugs;
+}
+
+function blockToYaml(
+  wire: WireBlock,
+  orig: WireBlock,
+  content: LoadedContent,
+  claimSlugs: Map<string, string>,
+): WireBlock {
   const bt = wire['blockType'] as string;
   if (bt === 'embed' || bt === 'recall') {
     const r = blockHeader(wire, bt);
@@ -658,6 +709,10 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
     case 'claim': {
       const r = blockHeader(wire, 'claim');
       r['name']    = wire['name'];
+      // `slug` sits right after `name`, matching where it sits on the addressable
+      // types (chapter/section) and in CANONICAL_ORDER below.
+      const slug = claimSlugs.get(wire['name'] as string);
+      if (slug) r['slug'] = slug;
       r['content'] = wire['content'];
       if (wire['formula']) r['formula'] = wire['formula'];
       return r;
@@ -698,7 +753,7 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'subsection');
       r['title']  = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
       return r;
     }
     case 'details': {
@@ -706,15 +761,20 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'details');
       if (wire['title']) r['title'] = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
       return r;
     }
     default: return orig;
   }
 }
 
-function mergeBlocks(orig: WireBlock[], wire: WireBlock[], content: LoadedContent): WireBlock[] {
-  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content));
+function mergeBlocks(
+  orig: WireBlock[],
+  wire: WireBlock[],
+  content: LoadedContent,
+  claimSlugs: Map<string, string>,
+): WireBlock[] {
+  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content, claimSlugs));
 }
 
 function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToObject: Map<string, unknown>): void {

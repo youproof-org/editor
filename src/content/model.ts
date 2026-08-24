@@ -85,10 +85,20 @@ export type ContentBlock =
 
 // NOTE: `locale` mirrors the shared content schema (services:
 // apps/website/lib/content/types.ts). It is modelled here because the editor
-// loads/edits exactly one locale at a time (see loader.ts's locale filter). The
-// addressable types also carry a `slug` in the YAML; the editor does not build
-// URLs, so `slug` is intentionally NOT modelled — it is preserved untouched on
-// save (saveFromModel merges into the loaded YAML rather than reconstructing it).
+// loads/edits exactly one locale at a time (see loader.ts's locale filter).
+//
+// `slug` is intentionally NOT modelled — the editor does not build URLs. It is
+// nonetheless PRESERVED on save, and that now covers three places rather than
+// one, because the knowledge base grew public per-node URLs:
+//   * entity level (definition/theorem/proof/remark, plus chapter/section) —
+//     saveFromModel merges into the loaded YAML instead of reconstructing it, so
+//     an unmodelled top-level key survives on its own; CANONICAL_ORDER lists
+//     `slug` so it also keeps its position in the file.
+//   * `claim` blocks and `terms` entries — these ARE reconstructed field by field
+//     on save, so their `slug` has to be copied across explicitly, keyed by the
+//     claim/term name. See collectClaimSlugs in handlers.ts.
+// Adding a new unmodelled sub-field to a claim or a term means extending that
+// copy step too, or the first save in the editor deletes it.
 
 export interface Book {
   id: string; filePath: string; type: 'book';
