@@ -38,6 +38,48 @@ function fixture() {
 
   writeFileSync(path.join(ns, NS), 'type: namespace\nname: proba\nlocale: hu\ntitle: Próba\n')
 
+  // A book, so there is something for a chapter/section target to resolve against
+  // and something for the `part` key order to be checked on.
+  const books = path.join(root, 'books', 'konyv', 'resz', 'fejezet')
+  mkdirSync(books, { recursive: true })
+  writeFileSync(path.join(root, 'books', 'episodes.yaml'), '- konyv\n')
+  writeFileSync(path.join(root, 'books', 'konyv', 'book.yaml'),
+    'type: book\nname: konyv\nslug: konyv\nlocale: hu\ntitle: Könyv\nparts:\n  - resz\n')
+  writeFileSync(path.join(root, 'books', 'konyv', 'resz', 'part.yaml'),
+    'type: part\nname: resz\nslug: resz\nlocale: hu\ntitle: Rész\nchapters:\n  - fejezet\n')
+  writeFileSync(path.join(books, 'chapter.yaml'), `type: chapter
+name: fejezet
+slug: fejezet
+locale: hu
+title: Fejezet
+references:
+  a-definition:
+    display: "[definíció]"
+    target: definitions.proba-definicio
+  a-claim:
+    display: "[állítás]"
+    target: definitions.proba-definicio.claims.top-level-claim
+  a-proof:
+    display: "[bizonyítás]"
+    target: theorems.proba-tetel.proofs.proba-bizonyitas
+  a-page:
+    display: "[Impresszum]"
+    target: pages.impresszum
+  a-book:
+    display: "[Könyv]"
+    target: books.konyv
+  a-url:
+    display: "Link"
+    target: https://example.org/x
+  a-mail:
+    display: "Mail"
+    target: mailto:hello@youproof.org
+prologue:
+  - type: narrative
+    content: Lásd [a-definition], [a-claim], [a-proof], [a-page], [a-book], [a-url], [a-mail].
+sections: []
+`)
+
   // definition: entity slug + two term slugs + two claim slugs, one claim nested
   // inside a subsection (claims are collected recursively).
   w('definitions/proba-definicio.yaml', `type: definition
@@ -132,8 +174,8 @@ function saveAll(root) {
   const content = loadContent(root, 'hu')
   const files = {}
   for (const [id, fp] of content.idToFilePath) {
-    if (!fp.includes(`${path.sep}knowledge-base${path.sep}`)) continue
     if (path.basename(fp) === NS) continue
+    if (path.basename(fp) === 'episodes.yaml') continue
     saveFromModel(id, content)
     files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
   }
@@ -195,4 +237,78 @@ test('saving is idempotent', () => {
   const first = saveAll(root)
   const second = saveAll(root)
   assert.deepEqual(second, first, 'a second save must not change any byte')
+})
+
+// ---------------------------------------------------------------------------
+// Reference targets
+// ---------------------------------------------------------------------------
+
+const chapterDoc = (files) =>
+  doc(files[path.join('books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')])
+
+test('a resolvable target is rewritten as the same fully qualified name', () => {
+  const root = fixture()
+  const refs = chapterDoc(saveAll(root)).references
+  // Rebuilt from the object graph, not echoed — which is what lets a path follow a
+  // rename. Landing on the identical string is the point.
+  assert.equal(refs['a-definition'].target, 'definitions.proba-definicio')
+  assert.equal(refs['a-claim'].target, 'definitions.proba-definicio.claims.top-level-claim')
+  assert.equal(refs['a-proof'].target, 'theorems.proba-tetel.proofs.proba-bizonyitas')
+})
+
+test('an external target survives, including a scheme with no slashes', () => {
+  const root = fixture()
+  const refs = chapterDoc(saveAll(root)).references
+  assert.equal(refs['a-url'].target, 'https://example.org/x')
+  // `mailto:` has no `//`, which is why the internal/external test is a scheme test.
+  assert.equal(refs['a-mail'].target, 'mailto:hello@youproof.org')
+})
+
+test('a target this editor cannot model survives a save', () => {
+  // The regression this exists for: the editor loads only books and the knowledge
+  // base, so an article/page/landing/book reference has nothing to resolve to. It
+  // used to load as an empty external and be written back with NO target at all —
+  // silently deleting it. Verified against the real content: 13 such references
+  // exist today.
+  const root = fixture()
+  const refs = chapterDoc(saveAll(root)).references
+  assert.equal(refs['a-page'].target, 'pages.impresszum', 'a page reference must not be dropped')
+  assert.equal(refs['a-book'].target, 'books.konyv', 'a book reference must not be dropped')
+})
+
+test('a reference target is never silently dropped', () => {
+  const root = fixture()
+  const refs = chapterDoc(saveAll(root)).references
+  for (const [key, entry] of Object.entries(refs)) {
+    assert.ok(entry.target, `reference '${key}' lost its target`)
+  }
+})
+
+test('a file with an unmigrated target refuses to save, rather than dropping it', () => {
+  // The window this guards: between the editor learning path targets and the
+  // content being migrated to them, every target in the content is still a
+  // composite object this editor cannot write back. Skipping it would delete it on
+  // save -- which is exactly what happened once, and what this refuses to repeat.
+  const root = fixture()
+  const legacy = path.join(root, 'books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
+  writeFileSync(legacy, `type: chapter
+name: fejezet
+slug: fejezet
+locale: hu
+title: Fejezet
+references:
+  old-shape:
+    display: "[definíció]"
+    target:
+      type: definition
+      namespace: /proba
+      name: proba-definicio
+prologue: []
+sections: []
+`)
+  const content = loadContent(root, 'hu')
+  const id = content.filePathToId.get(legacy)
+  assert.throws(() => saveFromModel(id, content), /cannot write back|Saving would delete/)
+  // And the file on disk is untouched, which is the point.
+  assert.match(readFileSync(legacy, 'utf8'), /type: definition/)
 })
