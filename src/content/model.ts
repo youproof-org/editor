@@ -25,12 +25,30 @@ export type RefTargetType =
   | 'chapter' | 'section'
   | 'definition' | 'theorem' | 'proof' | 'remark'
   | 'claim' | 'term'
-  | 'external';
+  | 'external'
+  // A well-formed target this editor cannot resolve, because it models only books
+  // and the knowledge base — a reference to an article, page, landing, book or part.
+  // Modelled explicitly so it can be written back untouched instead of being
+  // mistaken for an empty external and dropped; see RefTarget.fqn.
+  | 'unresolved';
 
-/** target = resolved ID of the referenced object, or URL when type === 'external'. */
+/**
+ * A reference target.
+ *
+ * `target` is the resolved ID of the referenced object, or the URL when
+ * `type === 'external'`, or empty when unresolved.
+ *
+ * `fqn` is the path exactly as authored, kept for every non-external target. It is
+ * what makes an unresolved target survive a save: the editor rebuilds a resolved
+ * target's path from the object graph (so it follows a rename), and writes this
+ * back verbatim when there is nothing to rebuild from. Without it, a reference the
+ * editor does not model loses its target on the first save — which is what used to
+ * happen to every article, page, landing and book reference.
+ */
 export interface RefTarget {
   type: RefTargetType;
   target: string;
+  fqn?: string;
 }
 
 // ─── Reference (inline, no file) ─────────────────────────────────────────────
