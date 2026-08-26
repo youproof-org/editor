@@ -185,8 +185,16 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
 
   // A target is a STRING now — a fully qualified name or a URL. The object guard
   // this used to have silently dropped every one of them.
+  //
+  // A target that is present but NOT a string is content this editor cannot read:
+  // a composite target from before the path migration. It is flagged rather than
+  // skipped, so that saving the file is refused instead of quietly deleting it.
   function enqueueTarget(rawTarget: unknown, set: (r: RefTarget) => void): void {
-    if (typeof rawTarget !== 'string' || !rawTarget.trim()) return;
+    if (rawTarget === undefined || rawTarget === null) return;
+    if (typeof rawTarget !== 'string' || !rawTarget.trim()) {
+      set({ type: 'unreadable', target: '' });
+      return;
+    }
     pending.push({ set, raw: rawTarget });
   }
 

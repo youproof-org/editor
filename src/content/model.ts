@@ -30,7 +30,12 @@ export type RefTargetType =
   // and the knowledge base — a reference to an article, page, landing, book or part.
   // Modelled explicitly so it can be written back untouched instead of being
   // mistaken for an empty external and dropped; see RefTarget.fqn.
-  | 'unresolved';
+  | 'unresolved'
+  // A target present in the YAML that this editor could not read at all — in
+  // practice, content not yet migrated to path targets, where `target` is still a
+  // composite object. There is nothing to write back, so saving the file would
+  // delete it. Modelled so the writer can REFUSE the save instead.
+  | 'unreadable';
 
 /**
  * A reference target.

@@ -482,6 +482,14 @@ function targetToYaml(
   content: LoadedContent,
 ): string | undefined {
   const { type, target: id, fqn } = target;
+  if (type === 'unreadable') {
+    throw new Error(
+      'This file has a reference target in the old composite form, which this editor ' +
+        'cannot write back. Saving would delete it. Migrate the content to path ' +
+        'targets first (scripts/migrate-ref-targets.mjs in the content repo), or ' +
+        'install the editor release that matches this content.',
+    );
+  }
   if (type === 'external') return id || undefined;
   if (type === 'unresolved' || !id) return fqn || undefined;
 

@@ -283,3 +283,32 @@ test('a reference target is never silently dropped', () => {
     assert.ok(entry.target, `reference '${key}' lost its target`)
   }
 })
+
+test('a file with an unmigrated target refuses to save, rather than dropping it', () => {
+  // The window this guards: between the editor learning path targets and the
+  // content being migrated to them, every target in the content is still a
+  // composite object this editor cannot write back. Skipping it would delete it on
+  // save -- which is exactly what happened once, and what this refuses to repeat.
+  const root = fixture()
+  const legacy = path.join(root, 'books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
+  writeFileSync(legacy, `type: chapter
+name: fejezet
+slug: fejezet
+locale: hu
+title: Fejezet
+references:
+  old-shape:
+    display: "[definíció]"
+    target:
+      type: definition
+      namespace: /proba
+      name: proba-definicio
+prologue: []
+sections: []
+`)
+  const content = loadContent(root, 'hu')
+  const id = content.filePathToId.get(legacy)
+  assert.throws(() => saveFromModel(id, content), /cannot write back|Saving would delete/)
+  // And the file on disk is untouched, which is the point.
+  assert.match(readFileSync(legacy, 'utf8'), /type: definition/)
+})
