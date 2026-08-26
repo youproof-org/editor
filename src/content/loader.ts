@@ -5,11 +5,12 @@ import type {
   LoadedContent,
   Book, Part, Chapter, Section,
   Namespace, Definition, Theorem, Proof, Remark,
-  Term, Reference, RefTarget, RefParent,
+  Term, Reference, RefTarget, RefTargetType, RefParent,
   ContentBlock, BlockParent,
   SubsectionBlock, DetailsBlock, EmbedBlock, RecallBlock,
   Labels, LabelCase,
 } from './model';
+import { isExternalTarget, parseFqn, type FqnKind } from './fqn';
 import { normalizeStrings } from './normalize';
 import { DEFAULT_LOCALE } from './locales';
 import { collectBlockText } from '../protocol/blockText';
@@ -57,7 +58,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
   const idToObject   = new Map<string, unknown>();
   const refPathToId  = new Map<string, string>(); // temporary; discarded after Pass 2
 
-  type PendingEntry = { set: (r: RefTarget) => void; raw: Record<string, unknown> };
+  type PendingEntry = { set: (r: RefTarget) => void; raw: unknown };
   const pending: PendingEntry[] = [];
 
   // Tracks entity lists keyed by namespace path, used in Pass 2 for wiring
@@ -182,9 +183,11 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
     });
   }
 
+  // A target is a STRING now — a fully qualified name or a URL. The object guard
+  // this used to have silently dropped every one of them.
   function enqueueTarget(rawTarget: unknown, set: (r: RefTarget) => void): void {
-    if (!rawTarget || typeof rawTarget !== 'object' || Array.isArray(rawTarget)) return;
-    pending.push({ set, raw: rawTarget as Record<string, unknown> });
+    if (typeof rawTarget !== 'string' || !rawTarget.trim()) return;
+    pending.push({ set, raw: rawTarget });
   }
 
   function loadRefs(rawMap: unknown, parent: RefParent): Reference[] {
@@ -566,8 +569,18 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
     }
   }
 
+  // Root indexes for target resolution. Definitions and theorems are addressed
+  // flat (their names are unique per type), so a name index is all the walk needs
+  // to start from; everything else is reached by stepping down from them.
+  const defsByName = new Map<string, Definition>();
+  const thmsByName = new Map<string, Theorem>();
+  for (const [, lists] of entityListsByNs) {
+    for (const d of lists.defs) defsByName.set(d.name, d);
+    for (const t of lists.thms) thmsByName.set(t.name, t);
+  }
+
   for (const { set, raw } of pending) {
-    set(resolveTarget(raw, refPathToId, idToObject));
+    set(resolveTarget(raw, { books, defsByName, thmsByName }));
   }
 
   return { books, kb, idToFilePath, filePathToId, idToObject };
@@ -575,46 +588,114 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
 
 // ─── Reference target resolution (Pass 2) ────────────────────────────────────
 
+/**
+ * Resolve a reference target string.
+ *
+ * A target is now a single string: a URL, or a fully qualified name like
+ * `theorems.{t}.proofs.{p}.terms.{x}`. Resolution WALKS the loaded object graph
+ * step by step rather than looking up a flat key, which is stricter for free — a
+ * path naming a proof that is not actually that theorem's proof fails to resolve
+ * instead of quietly finding the proof anyway.
+ *
+ * Runs in Pass 2, after ownership is wired, which is what makes the walk possible.
+ *
+ * Anything well-formed that this editor does not model — an article, page, landing,
+ * book or part — comes back as `unresolved` WITH its path intact, so the writer can
+ * put it back untouched. Returning an empty external instead is what used to delete
+ * those targets on save.
+ */
 function resolveTarget(
-  raw: Record<string, unknown>,
-  refPathToId: Map<string, string>,
-  idToObject: Map<string, unknown>,
+  raw: unknown,
+  roots: {
+    books: Book[]
+    defsByName: Map<string, Definition>
+    thmsByName: Map<string, Theorem>
+  },
 ): RefTarget {
-  const type = typeof raw['type'] === 'string' ? raw['type'] : '';
+  if (typeof raw !== 'string') return { type: 'external', target: '' };
+  const target = raw.trim();
+  if (isExternalTarget(target)) return { type: 'external', target };
 
-  if (type === 'external') {
-    return { type: 'external', target: typeof raw['url'] === 'string' ? raw['url'] : '' };
-  }
-  if (type === 'chapter') {
-    return { type: 'chapter', target: refPathToId.get(`/books/${raw['book']}/${raw['part']}/${raw['name']}`) ?? '' };
-  }
-  if (type === 'section') {
-    return { type: 'section', target: refPathToId.get(`/books/${raw['book']}/${raw['part']}/${raw['chapter']}/${raw['name']}`) ?? '' };
-  }
-  if (['definition', 'theorem', 'proof', 'remark'].includes(type)) {
-    return { type: type as RefTarget['type'], target: refPathToId.get(`/entities${raw['namespace']}/${raw['name']}`) ?? '' };
-  }
-  if (type === 'claim' || type === 'term') {
-    const p = raw['parent'];
-    if (!p || typeof p !== 'object' || Array.isArray(p)) return { type: type as RefTarget['type'], target: '' };
-    const pr       = p as Record<string, unknown>;
-    const parentId = refPathToId.get(`/entities${pr['namespace']}/${pr['name']}`) ?? '';
-    const parentObj = idToObject.get(parentId) as Record<string, unknown> | undefined;
-    if (!parentObj) return { type: type as RefTarget['type'], target: '' };
+  const steps = parseFqn(target);
+  if (!steps) return { type: 'unresolved', target: '', fqn: target };
 
-    if (type === 'claim') {
-      const body = Array.isArray(parentObj['body']) ? (parentObj['body'] as unknown[]) : [];
-      const found = body.find(b => {
-        const bobj = b as Record<string, unknown>;
-        return bobj['blockType'] === 'claim' && bobj['name'] === raw['name'];
-      }) as Record<string, unknown> | undefined;
-      return { type: 'claim', target: typeof found?.['id'] === 'string' ? found['id'] : '' };
-    } else {
-      const terms = Array.isArray(parentObj['terms']) ? (parentObj['terms'] as unknown[]) : [];
-      const found = terms.find(t => (t as Record<string, unknown>)['name'] === raw['name']) as Record<string, unknown> | undefined;
-      return { type: 'term', target: typeof found?.['id'] === 'string' ? found['id'] : '' };
+  const unresolved: RefTarget = { type: 'unresolved', target: '', fqn: target };
+  const found = (type: RefTargetType, id: unknown): RefTarget =>
+    typeof id === 'string' && id
+      ? { type, target: id, fqn: target }
+      : unresolved;
+
+  // Walk from the root. `node` is whatever the previous step resolved to.
+  let node: Record<string, unknown> | undefined;
+  for (let i = 0; i < steps.length; i++) {
+    const { kind, name } = steps[i];
+    const last = i === steps.length - 1;
+
+    if (i === 0) {
+      if (kind === 'book') {
+        node = roots.books.find(b => b.name === name) as unknown as Record<string, unknown>;
+      } else if (kind === 'definition') {
+        node = roots.defsByName.get(name) as unknown as Record<string, unknown>;
+      } else if (kind === 'theorem') {
+        node = roots.thmsByName.get(name) as unknown as Record<string, unknown>;
+      } else {
+        return unresolved; // article / page / landing: not modelled here
+      }
+      if (!node) return unresolved;
+      if (last) return found(kind as RefTargetType, node['id']);
+      continue;
     }
-  }
 
-  return { type: 'external', target: '' };
+    const child = childOf(node, kind, name);
+    if (!child) return unresolved;
+    node = child;
+    if (last) return found(kind as RefTargetType, node['id']);
+  }
+  return unresolved;
+}
+
+/** One step down from `node` into its `kind` children, by name. */
+function childOf(
+  node: Record<string, unknown> | undefined,
+  kind: FqnKind,
+  name: string,
+): Record<string, unknown> | undefined {
+  if (!node) return undefined;
+  const list = (key: string): Record<string, unknown>[] =>
+    Array.isArray(node[key]) ? (node[key] as Record<string, unknown>[]) : [];
+
+  switch (kind) {
+    case 'part':
+      return list('parts').find(p => p['name'] === name);
+    // A chapter hangs off its BOOK, not its part: chapter URLs flatten the part
+    // out, so a chapter moving between parts must not change how it is referenced.
+    case 'chapter':
+      return list('parts').flatMap(p => (Array.isArray(p['chapters']) ? p['chapters'] as Record<string, unknown>[] : []))
+        .find(c => c['name'] === name);
+    case 'section':
+      return list('sections').find(sec => sec['name'] === name);
+    case 'proof':
+      return list('proofs').find(pf => pf['name'] === name);
+    case 'remark':
+      return list('remarks').find(r => r['name'] === name);
+    case 'term':
+      return list('terms').find(t => t['name'] === name);
+    case 'claim':
+      return claimsOf(node).find(c => c['name'] === name);
+    default:
+      return undefined;
+  }
+}
+
+/** Claim blocks in a node's body, including ones nested in subsections/details. */
+function claimsOf(node: Record<string, unknown>): Record<string, unknown>[] {
+  const walk = (blocks: unknown): Record<string, unknown>[] => {
+    if (!Array.isArray(blocks)) return [];
+    return blocks.flatMap(b => {
+      const block = b as Record<string, unknown>;
+      const nested = walk(block['blocks']);
+      return block['blockType'] === 'claim' ? [block, ...nested] : nested;
+    });
+  };
+  return walk(node['body']);
 }
