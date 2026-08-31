@@ -5,6 +5,7 @@ import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
 import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
+import { buildFqn, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
 import { normalizeStrings } from './content/normalize';
 import { LOCALES } from './content/locales';
 import type {
@@ -460,40 +461,146 @@ function findFileBacked(id: string, content: LoadedContent): string | null {
 
 type WireBlock = Record<string, unknown>;
 
+/**
+ * Serialize a reference target back to YAML: a single string, either a URL or a
+ * fully qualified name.
+ *
+ * A resolved target's path is REBUILT from the object graph rather than echoed, so
+ * it follows a rename or a move made in the editor. An unresolved one — a
+ * well-formed path to something this editor does not model, i.e. an article, page,
+ * landing, book or part — is written back verbatim from `fqn`.
+ *
+ * That last case is not defensive tidiness. Before targets became strings, an
+ * unmodelled target loaded as an empty external and this function returned
+ * `undefined` for it, so the caller wrote no `target` key at all: every article,
+ * page and book reference lost its target on the first save of the file that
+ * contained it. Returning `undefined` now means only "there is genuinely nothing to
+ * write".
+ */
 function targetToYaml(
-  target: { type: string; target: string },
+  target: { type: string; target: string; fqn?: string },
   content: LoadedContent,
-): Record<string, unknown> | undefined {
-  const { type, target: id } = target;
-  if (!id) return undefined;
-  if (type === 'external') return { type: 'external', url: id };
+): string | undefined {
+  const { type, target: id, fqn } = target;
+  if (type === 'unreadable') {
+    throw new Error(
+      'This file has a reference target in the old composite form, which this editor ' +
+        'cannot write back. Saving would delete it. Migrate the content to path ' +
+        'targets first (scripts/migrate-ref-targets.mjs in the content repo), or ' +
+        'install the editor release that matches this content.',
+    );
+  }
+  if (type === 'external') return id || undefined;
+  if (type === 'unresolved' || !id) return fqn || undefined;
 
   const obj = content.idToObject.get(id) as Record<string, unknown> | undefined;
-  if (!obj) return undefined;
+  if (!obj) return fqn || undefined;
 
-  if (type === 'chapter') {
-    const part = obj['part'] as { name: string; book: { name: string } };
-    return { type: 'chapter', book: part.book.name, part: part.name, name: obj['name'] };
+  const steps = stepsForObject(obj, type as FqnKind, content);
+  return steps ? buildFqn(steps) : (fqn || undefined);
+}
+
+/**
+ * The ancestor chain of a referenced object, as fully qualified name steps.
+ *
+ * Walks UP through the parent pointers the loader wired, which is what makes a path
+ * follow the object rather than the text it was authored from. Returns null when the
+ * chain cannot be completed, so the caller falls back to the authored path instead
+ * of writing a truncated one.
+ */
+function stepsForObject(
+  obj: Record<string, unknown>,
+  kind: FqnKind,
+  content: LoadedContent,
+): FqnStep[] | null {
+  const name = obj['name'];
+  if (typeof name !== 'string') return null;
+  const self: FqnStep = { kind, name };
+
+  switch (kind) {
+    case 'definition':
+    case 'theorem':
+      return [self];
+    case 'proof': {
+      // A proof's theorem is not a back-pointer on the proof, so it is found by
+      // asking which theorem lists it.
+      const theorem = findOwner(content, 'theorem', (t) =>
+        (t['proofs'] as Record<string, unknown>[] | undefined)?.some((p) => p['id'] === obj['id']) ?? false);
+      if (!theorem) return null;
+      const parent = stepsForObject(theorem, 'theorem', content);
+      return parent ? [...parent, self] : null;
+    }
+    case 'remark': {
+      const owner = findOwner(content, null, (o) =>
+        (o['remarks'] as Record<string, unknown>[] | undefined)?.some((r) => r['id'] === obj['id']) ?? false);
+      if (!owner) return null;
+      const ownerKind = owner['type'] as FqnKind;
+      const parent = stepsForObject(owner, ownerKind, content);
+      return parent ? [...parent, self] : null;
+    }
+    case 'claim':
+    case 'term': {
+      const parentObj = obj['parent'] as Record<string, unknown> | undefined;
+      if (!parentObj || typeof parentObj['type'] !== 'string') {
+        throw new Error(
+          `${kind} "${name}" has no entity parent — claims nested in subsections or ` +
+            `details are not supported.`,
+        );
+      }
+      const parent = stepsForObject(parentObj, parentObj['type'] as FqnKind, content);
+      return parent ? [...parent, self] : null;
+    }
+    case 'chapter': {
+      const part = obj['part'] as { name: string; book: { name: string } } | undefined;
+      if (!part?.book?.name) return null;
+      // No part step: a chapter is addressed under its book (see fqn.ts).
+      return [{ kind: 'book', name: part.book.name }, self];
+    }
+    case 'section': {
+      const chapter = obj['chapter'] as Record<string, unknown> | undefined;
+      if (!chapter) return null;
+      const parent = stepsForObject(chapter, 'chapter', content);
+      return parent ? [...parent, self] : null;
+    }
+    case 'part': {
+      const book = obj['book'] as { name: string } | undefined;
+      if (!book?.name) return null;
+      return [{ kind: 'book', name: book.name }, self];
+    }
+    case 'book':
+      return [self];
+    default:
+      return null;
   }
-  if (type === 'section') {
-    const ch = obj['chapter'] as { name: string; part: { name: string; book: { name: string } } };
-    return { type: 'section', book: ch.part.book.name, part: ch.part.name, chapter: ch.name, name: obj['name'] };
-  }
-  if (['definition', 'theorem', 'proof', 'remark'].includes(type)) {
-    return { type, namespace: obj['namespacePath'], name: obj['name'] };
-  }
-  if (type === 'term' || type === 'claim') {
-    const parent = obj['parent'] as { type?: string; name: string; namespacePath?: string };
-    if (!parent.namespacePath) throw new Error(
-      `${type} "${obj['name']}" has a non-entity parent — claims nested in subsections/details are not supported`,
-    );
-    return { type, name: obj['name'],
-      parent: { type: parent.type, namespace: parent.namespacePath, name: parent.name } };
+}
+
+/** First loaded object of `type` (or any type) satisfying `pred`. */
+function findOwner(
+  content: LoadedContent,
+  type: string | null,
+  pred: (obj: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined {
+  for (const value of content.idToObject.values()) {
+    const obj = value as Record<string, unknown>;
+    if (type !== null && obj['type'] !== type) continue;
+    if (pred(obj)) return obj;
   }
   return undefined;
 }
 
-function saveFromModel(id: string, content: LoadedContent): void {
+// Types whose `terms` map the model actually represents (see model.ts: `Proof`
+// has no `terms`). Only for these may an empty model mean "the author deleted the
+// terms" — for anything else the field simply isn't modelled, so it must be left
+// exactly as authored rather than deleted. Mirrors how `labels` below is only
+// rewritten for the two types that model it. Defining terms directly on a proof
+// is a planned content feature; without this guard the first save would silently
+// destroy such a block.
+const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
+
+// Exported for the round-trip test (test/save-roundtrip.test.mjs), which asserts
+// that saving a knowledge-base file preserves the unmodelled `slug` fields and is
+// idempotent. Not part of the extension's public surface.
+export function saveFromModel(id: string, content: LoadedContent): void {
   const filePath = content.idToFilePath.get(id);
   if (!filePath) return;
 
@@ -507,6 +614,12 @@ function saveFromModel(id: string, content: LoadedContent): void {
   // field on save.
   const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
+  // Read the unmodelled `slug`s off the file BEFORE any field is rewritten below.
+  const claimSlugs = collectClaimSlugs(yamlDoc);
+  const origTerms = (yamlDoc['terms'] && typeof yamlDoc['terms'] === 'object' && !Array.isArray(yamlDoc['terms']))
+    ? yamlDoc['terms'] as Record<string, unknown>
+    : {};
+
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
       if (!Array.isArray(modelBlocks) || modelBlocks.length === 0) {
@@ -514,7 +627,7 @@ function saveFromModel(id: string, content: LoadedContent): void {
         return;
       }
       const orig = (yamlDoc[yamlField] ?? []) as WireBlock[];
-      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content);
+      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content, claimSlugs);
     };
     merge('abstract',             obj['abstract']            as WireBlock[]);
     merge('prerequisite-warning', obj['prerequisiteWarning'] as WireBlock[]);
@@ -524,7 +637,7 @@ function saveFromModel(id: string, content: LoadedContent): void {
     const modelBody = Array.isArray(obj['body']) ? obj['body'] as WireBlock[] : [];
     if (modelBody.length > 0) {
       const orig = (yamlDoc['body'] ?? []) as WireBlock[];
-      yamlDoc['body'] = mergeBlocks(orig, modelBody, content);
+      yamlDoc['body'] = mergeBlocks(orig, modelBody, content, claimSlugs);
     } else {
       delete yamlDoc['body'];
     }
@@ -534,15 +647,24 @@ function saveFromModel(id: string, content: LoadedContent): void {
   if (modelTermsArr.length > 0) {
     const termsYaml: Record<string, unknown> = {};
     for (const t of modelTermsArr) {
+      const name  = t['name'] as string;
       const entry: Record<string, unknown> = {};
+      // Unmodelled `slug`, carried over from the file keyed by the term name —
+      // same rule as claim slugs (see collectClaimSlugs). First key in the entry,
+      // since the map key is the term's name.
+      const prev = origTerms[name];
+      const slug = prev && typeof prev === 'object' && !Array.isArray(prev)
+        ? (prev as Record<string, unknown>)['slug']
+        : undefined;
+      if (typeof slug === 'string') entry['slug'] = slug;
       if (t['display'])   entry['display']   = t['display'];
       if (t['canonical']) entry['canonical'] = t['canonical'];
       if (Array.isArray(t['synonyms']) && (t['synonyms'] as unknown[]).length)
         entry['synonyms'] = t['synonyms'];
-      termsYaml[t['name'] as string] = entry;
+      termsYaml[name] = entry;
     }
     yamlDoc['terms'] = termsYaml;
-  } else {
+  } else if (TERM_BEARING_TYPES.includes(type)) {
     delete yamlDoc['terms'];
   }
 
@@ -593,18 +715,20 @@ function saveFromModel(id: string, content: LoadedContent): void {
 // localization fields (`slug`, `locale`), the chapter migration/listing fields
 // (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
 // (`meta`) are included so they stay in place on save (read from / written back
-// verbatim, not modelled). `locale` follows `name`; addressable types
-// (chapter/section) also carry `slug`. Keys not listed are still preserved —
+// verbatim, not modelled). `slug` follows `name` and `locale` follows `slug`, on
+// every type that carries one — the knowledge-base types now do, since each of
+// them has its own public URL. Keys not listed are still preserved —
 // appended after these — but list everything the content emits so nothing moves.
 // Types with NO entry here (book, article, newsletter, page, landing) are left
 // untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
 // position; add an entry when the editor gains a UI for those types.
 const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'references', 'body'],
-  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
+  definition: ['type', 'name', 'slug', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
+  theorem:    ['type', 'name', 'slug', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'slug', 'locale', 'title', 'remarks', 'terms', 'references', 'body'],
+  remark:     ['type', 'name', 'slug', 'locale', 'title', 'terms', 'references', 'body'],
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
+  part:       ['type', 'name', 'slug', 'locale', 'title', 'chapters'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
                'meta', 'thumbnail', 'references',
                'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
@@ -630,7 +754,42 @@ function blockHeader(wire: WireBlock, type: string): WireBlock {
   return r;
 }
 
-function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): WireBlock {
+/**
+ * Claim `slug`s (and term `slug`s, below) are authored in the content YAML but are
+ * deliberately NOT modelled — the editor has no UI for them (see model.ts). They
+ * must therefore be carried across a save from the file on disk.
+ *
+ * Keyed by the claim `name`, never by position: the editor lets an author insert,
+ * delete and reorder blocks, so an index-paired lookup would transplant a slug
+ * onto a different claim. A *renamed* claim legitimately loses its slug — the slug
+ * describes the claim's content, so a rename invalidates it, and re-deriving it is
+ * an authoring decision rather than something to guess here.
+ */
+function collectClaimSlugs(yamlDoc: Record<string, unknown>): Map<string, string> {
+  const slugs = new Map<string, string>();
+  const walk = (blocks: unknown): void => {
+    if (!Array.isArray(blocks)) return;
+    for (const b of blocks) {
+      if (!b || typeof b !== 'object') continue;
+      const blk = b as Record<string, unknown>;
+      if (blk['type'] === 'claim' && typeof blk['name'] === 'string' && typeof blk['slug'] === 'string') {
+        slugs.set(blk['name'], blk['slug']);
+      }
+      walk(blk['blocks']);
+    }
+  };
+  for (const field of ['body', 'abstract', 'prerequisite-warning', 'prologue', 'epilogue']) {
+    walk(yamlDoc[field]);
+  }
+  return slugs;
+}
+
+function blockToYaml(
+  wire: WireBlock,
+  orig: WireBlock,
+  content: LoadedContent,
+  claimSlugs: Map<string, string>,
+): WireBlock {
   const bt = wire['blockType'] as string;
   if (bt === 'embed' || bt === 'recall') {
     const r = blockHeader(wire, bt);
@@ -658,6 +817,22 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
     case 'claim': {
       const r = blockHeader(wire, 'claim');
       r['name']    = wire['name'];
+      // `slug` sits right after `name`, matching where it sits on the addressable
+      // types (chapter/section) and in CANONICAL_ORDER below.
+      // The only identifier this editor lets an author type: a new claim block is
+      // created with an empty name. It becomes a segment of a dotted path — a
+      // reference to it is `...claims.{name}` — so a `.` or a space would make that
+      // reference unparseable, and the site build would reject it far from here.
+      const claimName = wire['name'];
+      if (typeof claimName !== 'string' || !IDENTIFIER_RE.test(claimName)) {
+        throw new Error(
+          `Claim name ${JSON.stringify(claimName)} is not a valid identifier: it must be ` +
+            `lowercase kebab-case (${IDENTIFIER_RE.source}). A claim name is part of the ` +
+            `path that references it, so it cannot contain a '.', a space or a capital.`,
+        );
+      }
+      const slug = claimSlugs.get(claimName);
+      if (slug) r['slug'] = slug;
       r['content'] = wire['content'];
       if (wire['formula']) r['formula'] = wire['formula'];
       return r;
@@ -698,7 +873,7 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'subsection');
       r['title']  = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
       return r;
     }
     case 'details': {
@@ -706,15 +881,20 @@ function blockToYaml(wire: WireBlock, orig: WireBlock, content: LoadedContent): 
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'details');
       if (wire['title']) r['title'] = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
       return r;
     }
     default: return orig;
   }
 }
 
-function mergeBlocks(orig: WireBlock[], wire: WireBlock[], content: LoadedContent): WireBlock[] {
-  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content));
+function mergeBlocks(
+  orig: WireBlock[],
+  wire: WireBlock[],
+  content: LoadedContent,
+  claimSlugs: Map<string, string>,
+): WireBlock[] {
+  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content, claimSlugs));
 }
 
 function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToObject: Map<string, unknown>): void {

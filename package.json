@@ -3,7 +3,7 @@
   "publisher": "youproof.org",
   "displayName": "YouProof Editor",
   "description": "Sidebar explorer for YouProof mathematical content YAML files",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/youproof-org/editor.git"
@@ -12,8 +12,12 @@
     "vscode": "^1.85.0",
     "node": ">=24.18.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -39,7 +43,11 @@
       {
         "viewType": "youproof.nodeEditor",
         "displayName": "YouProof Node Editor",
-        "selector": [{ "filenamePattern": "*.youproof-node" }],
+        "selector": [
+          {
+            "filenamePattern": "*.youproof-node"
+          }
+        ],
         "priority": "default"
       }
     ],
@@ -55,7 +63,8 @@
   },
   "scripts": {
     "build": "tsc -p ./ && esbuild media/src/sidebar/index.tsx --bundle --outfile=media/panel.js --platform=browser --format=iife --jsx=automatic --sourcemap && esbuild media/src/editor/index.tsx --bundle --outfile=media/editor.js --platform=browser --format=iife --jsx=automatic --sourcemap",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "test": "tsc -p ./ && node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "@codemirror/commands": "^6.0.0",

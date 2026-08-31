@@ -25,12 +25,35 @@ export type RefTargetType =
   | 'chapter' | 'section'
   | 'definition' | 'theorem' | 'proof' | 'remark'
   | 'claim' | 'term'
-  | 'external';
+  | 'external'
+  // A well-formed target this editor cannot resolve, because it models only books
+  // and the knowledge base — a reference to an article, page, landing, book or part.
+  // Modelled explicitly so it can be written back untouched instead of being
+  // mistaken for an empty external and dropped; see RefTarget.fqn.
+  | 'unresolved'
+  // A target present in the YAML that this editor could not read at all — in
+  // practice, content not yet migrated to path targets, where `target` is still a
+  // composite object. There is nothing to write back, so saving the file would
+  // delete it. Modelled so the writer can REFUSE the save instead.
+  | 'unreadable';
 
-/** target = resolved ID of the referenced object, or URL when type === 'external'. */
+/**
+ * A reference target.
+ *
+ * `target` is the resolved ID of the referenced object, or the URL when
+ * `type === 'external'`, or empty when unresolved.
+ *
+ * `fqn` is the path exactly as authored, kept for every non-external target. It is
+ * what makes an unresolved target survive a save: the editor rebuilds a resolved
+ * target's path from the object graph (so it follows a rename), and writes this
+ * back verbatim when there is nothing to rebuild from. Without it, a reference the
+ * editor does not model loses its target on the first save — which is what used to
+ * happen to every article, page, landing and book reference.
+ */
 export interface RefTarget {
   type: RefTargetType;
   target: string;
+  fqn?: string;
 }
 
 // ─── Reference (inline, no file) ─────────────────────────────────────────────
@@ -85,10 +108,20 @@ export type ContentBlock =
 
 // NOTE: `locale` mirrors the shared content schema (services:
 // apps/website/lib/content/types.ts). It is modelled here because the editor
-// loads/edits exactly one locale at a time (see loader.ts's locale filter). The
-// addressable types also carry a `slug` in the YAML; the editor does not build
-// URLs, so `slug` is intentionally NOT modelled — it is preserved untouched on
-// save (saveFromModel merges into the loaded YAML rather than reconstructing it).
+// loads/edits exactly one locale at a time (see loader.ts's locale filter).
+//
+// `slug` is intentionally NOT modelled — the editor does not build URLs. It is
+// nonetheless PRESERVED on save, and that now covers three places rather than
+// one, because the knowledge base grew public per-node URLs:
+//   * entity level (definition/theorem/proof/remark, plus chapter/section) —
+//     saveFromModel merges into the loaded YAML instead of reconstructing it, so
+//     an unmodelled top-level key survives on its own; CANONICAL_ORDER lists
+//     `slug` so it also keeps its position in the file.
+//   * `claim` blocks and `terms` entries — these ARE reconstructed field by field
+//     on save, so their `slug` has to be copied across explicitly, keyed by the
+//     claim/term name. See collectClaimSlugs in handlers.ts.
+// Adding a new unmodelled sub-field to a claim or a term means extending that
+// copy step too, or the first save in the editor deletes it.
 
 export interface Book {
   id: string; filePath: string; type: 'book';
