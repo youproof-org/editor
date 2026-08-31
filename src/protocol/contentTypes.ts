@@ -21,6 +21,8 @@ export interface SelectContentObjectRequest   { id: string; permanent?: boolean;
 export interface SaveRecursivelyRequest       { ids: string[]; }
 export interface OpenContentObjectFileRequest { id: string; }
 export interface SetContentObjectDirtyRequest { id: string; }
+/** Reload the model; `locale` switches the loaded locale (default: reload current). */
+export interface ReloadModelRequest           { locale?: string; }
 export interface BeginSelectTargetRequest     { selectorId: string; allowedTypes: string[]; }
 export interface EndSelectTargetRequest       { targetId: string | null; }
 export interface OpenExternalUrlRequest                  { url: string; }
@@ -67,8 +69,10 @@ export type SaveContentObjectRequest =
 
 // ─── Response types ────────────────────────────────────────────────────────────
 
-export interface GetContentTreeResponse { books: ContentTreeItem[]; kb: ContentTreeItem[]; selectedId: string | null; }
-export interface ReloadModelResponse    { books: ContentTreeItem[]; kb: ContentTreeItem[]; selectedId: string | null; }
+// `locales` = configured locale codes (one reload button each); `activeLocale`
+// = the locale currently loaded in the model.
+export interface GetContentTreeResponse { books: ContentTreeItem[]; kb: ContentTreeItem[]; selectedId: string | null; locales: string[]; activeLocale: string; }
+export interface ReloadModelResponse    { books: ContentTreeItem[]; kb: ContentTreeItem[]; selectedId: string | null; locales: string[]; activeLocale: string; }
 
 export interface ContentTargetObject { id: string; type: string; label: string; }
 
