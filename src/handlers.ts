@@ -716,8 +716,9 @@ export function saveFromModel(id: string, content: LoadedContent): void {
 // (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
 // (`meta`) are included so they stay in place on save (read from / written back
 // verbatim, not modelled). `slug` follows `name` and `locale` follows `slug`, on
-// every type that carries one — the knowledge-base types now do, since each of
-// them has its own public URL. Keys not listed are still preserved —
+// every type that carries one — a proof and a remark carry none, since each is
+// addressed by its position in the list of the node that owns it rather than by
+// an identifier of its own. Keys not listed are still preserved —
 // appended after these — but list everything the content emits so nothing moves.
 // Types with NO entry here (book, article, newsletter, page, landing) are left
 // untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
@@ -725,8 +726,8 @@ export function saveFromModel(id: string, content: LoadedContent): void {
 const CANONICAL_ORDER: Record<string, string[]> = {
   definition: ['type', 'name', 'slug', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
   theorem:    ['type', 'name', 'slug', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'slug', 'locale', 'title', 'remarks', 'terms', 'references', 'body'],
-  remark:     ['type', 'name', 'slug', 'locale', 'title', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'terms', 'references', 'body'],
+  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
   part:       ['type', 'name', 'slug', 'locale', 'title', 'chapters'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',

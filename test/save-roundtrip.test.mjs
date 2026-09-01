@@ -1,12 +1,14 @@
 // Round-trip guard for the editor's YAML writer.
 //
-// The knowledge base now carries public per-node URLs, so entity, `claim` and
-// `terms` entries all gained a `slug` that the editor does NOT model. Claims and
-// terms are reconstructed field by field on save, so without explicit carry-over
-// the first save in the editor silently deletes their slug — that is the
-// regression this file exists to catch. It also pins two neighbouring
-// invariants: a proof's `terms` block survives (the model has no `Proof.terms`,
-// so an empty model must not be read as "delete"), and saving is idempotent.
+// The knowledge base carries public per-node URLs, so a definition, a theorem and
+// every `claim` and `terms` entry has a `slug` that the editor does NOT model. A
+// proof and a remark have none — each is addressed by its position in the list of
+// the node that owns it. Claims and terms are reconstructed field by field on
+// save, so without explicit carry-over the first save in the editor silently
+// deletes their slug — that is the regression this file exists to catch. It also
+// pins two neighbouring invariants: a proof's `terms` block survives (the model
+// has no `Proof.terms`, so an empty model must not be read as "delete"), and
+// saving is idempotent.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
@@ -134,7 +136,6 @@ body:
   // proof: terms + a claim, neither of which the model represents for a proof
   w('proofs/proba-bizonyitas.yaml', `type: proof
 name: proba-bizonyitas
-slug: proba-bizonyitas
 locale: hu
 remarks: []
 terms:
@@ -154,7 +155,6 @@ body:
 
   w('remarks/proba-megjegyzes.yaml', `type: remark
 name: proba-megjegyzes
-slug: proba-megjegyzes
 locale: hu
 terms:
   remark-term:
@@ -201,7 +201,7 @@ test('entity, claim and term slugs survive a save', () => {
   }, 'claim slugs, including one nested in a subsection')
 
   const rem = doc(files[path.join('knowledge-base', 'proba', 'remarks', 'proba-megjegyzes.yaml')])
-  assert.equal(rem.slug, 'proba-megjegyzes')
+  assert.ok(!('slug' in rem), 'a remark has no slug, and a save must not invent one')
   assert.equal(rem.terms['remark-term'].slug, 'megjegyzes-fogalom')
 
   const thm = doc(files[path.join('knowledge-base', 'proba', 'theorems', 'proba-tetel.yaml')])
@@ -216,19 +216,21 @@ test('a proof keeps its terms block, which the model does not represent', () => 
   assert.ok(proof.terms, 'terms block must not be deleted')
   assert.equal(proof.terms['proof-term'].slug, 'bizonyitas-fogalom')
   assert.equal(proof.terms['proof-term'].canonical, 'bizonyítás-fogalom')
-  assert.equal(proof.slug, 'proba-bizonyitas')
+  assert.ok(!('slug' in proof), 'a proof has no slug, and a save must not invent one')
   assert.equal(claims(proof.body)[0].slug, 'bizonyitas-allitas')
 })
 
-test('slug keeps its position: immediately after name', () => {
+const SLUGLESS_TYPES = ['proof', 'remark']
+
+test('slug keeps its position: immediately after name, on every type that has one', () => {
   const root = fixture()
   const files = saveAll(root)
   for (const [rel, text] of Object.entries(files)) {
-    const keys = Object.keys(doc(text))
-    assert.equal(keys[0], 'type', rel)
-    assert.equal(keys[1], 'name', rel)
-    assert.equal(keys[2], 'slug', rel)
-    assert.equal(keys[3], 'locale', rel)
+    const d = doc(text)
+    const head = SLUGLESS_TYPES.includes(d.type)
+      ? ['type', 'name', 'locale']
+      : ['type', 'name', 'slug', 'locale']
+    assert.deepEqual(Object.keys(d).slice(0, head.length), head, rel)
   }
 })
 
