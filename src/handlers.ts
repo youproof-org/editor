@@ -5,7 +5,7 @@ import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
 import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
-import { buildFqn, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
+import { buildFqn, isExternalTarget, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
 import { normalizeStrings } from './content/normalize';
 import { LOCALES } from './content/locales';
 import type {
@@ -500,6 +500,9 @@ function targetToYaml(
   return steps ? buildFqn(steps) : (fqn || undefined);
 }
 
+// The types a remark can hang off, per the FQN grammar (see fqn.ts).
+const REMARK_OWNER_TYPES = ['definition', 'theorem', 'proof'];
+
 /**
  * The ancestor chain of a referenced object, as fully qualified name steps.
  *
@@ -531,8 +534,13 @@ function stepsForObject(
       return parent ? [...parent, self] : null;
     }
     case 'remark': {
+      // Restricted to the three types that can OWN a remark: a namespace also
+      // carries a `remarks` array — every remark in its folder — and being first
+      // in the loader's registration order it would win this search, then end the
+      // walk at `default: null` because a namespace is not addressable.
       const owner = findOwner(content, null, (o) =>
-        (o['remarks'] as Record<string, unknown>[] | undefined)?.some((r) => r['id'] === obj['id']) ?? false);
+        REMARK_OWNER_TYPES.includes(o['type'] as string) &&
+        ((o['remarks'] as Record<string, unknown>[] | undefined)?.some((r) => r['id'] === obj['id']) ?? false));
       if (!owner) return null;
       const ownerKind = owner['type'] as FqnKind;
       const parent = stepsForObject(owner, ownerKind, content);
@@ -916,13 +924,19 @@ function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToObject: M
   }
 }
 
-function updateModelRefs(obj: WireBlock, incoming: ContentReference[], idToObject: Map<string, unknown>): void {
+// Exported, with serializeRefs below, for the round-trip test
+// (test/save-roundtrip.test.mjs): the two together are the webview round trip a
+// save actually goes through, where a target survives only as its ID. Not part of
+// the extension's public surface.
+export function updateModelRefs(obj: WireBlock, incoming: ContentReference[], idToObject: Map<string, unknown>): void {
   const resolveTarget = (targetId: string | undefined): WireBlock => {
     if (!targetId) return { type: 'external', target: '' };
     const found = idToObject.get(targetId) as Record<string, unknown> | undefined;
     if (found) {
       const t = found['type'] as string | undefined;
-      if (['chapter', 'section', 'definition', 'theorem', 'proof', 'remark'].includes(t ?? ''))
+      // Every type the FQN grammar can address, so that a path this editor CAN
+      // rebuild is not written back as an empty external — which deletes it.
+      if (['book', 'part', 'chapter', 'section', 'definition', 'theorem', 'proof', 'remark'].includes(t ?? ''))
         return { type: t!, target: targetId };
       if (found['blockType'] === 'claim') return { type: 'claim', target: targetId };
       const parent = found['parent'] as Record<string, unknown> | undefined;
@@ -930,15 +944,31 @@ function updateModelRefs(obj: WireBlock, incoming: ContentReference[], idToObjec
       if (parentTerms.includes(found)) return { type: 'term', target: targetId };
       return { type: 'external', target: '' };
     }
-    if (targetId.startsWith('http://') || targetId.startsWith('https://'))
-      return { type: 'external', target: targetId };
+    // A scheme test, not an `http` test: `mailto:` is an external target too.
+    if (isExternalTarget(targetId)) return { type: 'external', target: targetId };
     return { type: 'external', target: '' };
+  };
+  // The wire carries only a target's ID, so the authored path is rebuilt on save by
+  // walking the object graph. Carrying the loader's `fqn` over keeps the authored
+  // path as the writer's fallback for as long as the target is the same object —
+  // without it, a path the walk cannot rebuild is written as no target at all,
+  // which deletes it from the file.
+  const carryFqn = (prev: unknown, next: WireBlock): WireBlock => {
+    const p = prev as { target?: string; fqn?: string } | undefined;
+    if (!p?.fqn || p.target !== next['target']) return next;
+    next['fqn'] = p.fqn;
+    // A path with no object behind it is what the loader calls `unresolved` — a
+    // target this editor does not model, such as an article or a page. Naming it
+    // that again is what makes the writer put the path back untouched.
+    if (!next['target']) next['type'] = 'unresolved';
+    return next;
   };
   const modelRefs = Array.isArray(obj['references']) ? obj['references'] as WireBlock[] : [];
   obj['references'] = incoming.map(r => {
     const existing = modelRefs.find(m => m['id'] === r.id);
     if (existing) {
-      existing['name'] = r.name; existing['display'] = r.display; existing['target'] = resolveTarget(r.targetId);
+      existing['name'] = r.name; existing['display'] = r.display;
+      existing['target'] = carryFqn(existing['target'], resolveTarget(r.targetId));
       return existing;
     }
     const newRef: WireBlock = { id: r.id, name: r.name, display: r.display, target: resolveTarget(r.targetId), parent: obj };
@@ -1028,7 +1058,7 @@ function serializeBlocks(blocks: unknown[]): Record<string, unknown>[] {
   return (blocks as Array<Record<string, unknown>>).map(serializeBlock);
 }
 
-function serializeRefs(raw: unknown[]): Array<Record<string, unknown>> {
+export function serializeRefs(raw: unknown[]): Array<Record<string, unknown>> {
   return (raw as Array<Record<string, unknown>>).map(r => {
     const tgt = r['target'] as { type: string; target: string } | undefined;
     return { id: r['id'], name: r['name'], display: r['display'], targetId: tgt?.target };
