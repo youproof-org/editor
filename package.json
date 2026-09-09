@@ -3,7 +3,7 @@
   "publisher": "youproof.org",
   "displayName": "YouProof Editor",
   "description": "Sidebar explorer for YouProof mathematical content YAML files",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/youproof-org/editor.git"
