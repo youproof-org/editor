@@ -1,12 +1,14 @@
 // Round-trip guard for the editor's YAML writer.
 //
-// The knowledge base now carries public per-node URLs, so entity, `claim` and
-// `terms` entries all gained a `slug` that the editor does NOT model. Claims and
-// terms are reconstructed field by field on save, so without explicit carry-over
-// the first save in the editor silently deletes their slug — that is the
-// regression this file exists to catch. It also pins two neighbouring
-// invariants: a proof's `terms` block survives (the model has no `Proof.terms`,
-// so an empty model must not be read as "delete"), and saving is idempotent.
+// The knowledge base carries public per-node URLs, so a definition, a theorem and
+// every `claim` and `terms` entry has a `slug` that the editor does NOT model. A
+// proof and a remark have none — each is addressed by its position in the list of
+// the node that owns it. Claims and terms are reconstructed field by field on
+// save, so without explicit carry-over the first save in the editor silently
+// deletes their slug — that is the regression this file exists to catch. It also
+// pins two neighbouring invariants: a proof's `terms` block survives (the model
+// has no `Proof.terms`, so an empty model must not be read as "delete"), and
+// saving is idempotent.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
@@ -23,7 +25,7 @@ Module._load = function (request, ...rest) {
   return realLoad.call(this, request, ...rest)
 }
 
-const { saveFromModel } = await import('../out/handlers.js')
+const { saveFromModel, serializeRefs, updateModelRefs } = await import('../out/handlers.js')
 const { loadContent } = await import('../out/content/loader.js')
 
 const NS = 'namespace.yaml'
@@ -62,6 +64,12 @@ references:
   a-proof:
     display: "[bizonyítás]"
     target: theorems.proba-tetel.proofs.proba-bizonyitas
+  a-remark:
+    display: "[megjegyzés]"
+    target: definitions.proba-definicio.remarks.proba-megjegyzes
+  a-remark-term:
+    display: "[megjegyzés-fogalom]"
+    target: definitions.proba-definicio.remarks.proba-megjegyzes.terms.remark-term
   a-page:
     display: "[Impresszum]"
     target: pages.impresszum
@@ -76,7 +84,9 @@ references:
     target: mailto:hello@youproof.org
 prologue:
   - type: narrative
-    content: Lásd [a-definition], [a-claim], [a-proof], [a-page], [a-book], [a-url], [a-mail].
+    content: >-
+      Lásd [a-definition], [a-claim], [a-proof], [a-remark], [a-remark-term],
+      [a-page], [a-book], [a-url], [a-mail].
 sections: []
 `)
 
@@ -134,7 +144,6 @@ body:
   // proof: terms + a claim, neither of which the model represents for a proof
   w('proofs/proba-bizonyitas.yaml', `type: proof
 name: proba-bizonyitas
-slug: proba-bizonyitas
 locale: hu
 remarks: []
 terms:
@@ -154,7 +163,6 @@ body:
 
   w('remarks/proba-megjegyzes.yaml', `type: remark
 name: proba-megjegyzes
-slug: proba-megjegyzes
 locale: hu
 terms:
   remark-term:
@@ -182,6 +190,25 @@ function saveAll(root) {
   return files
 }
 
+/**
+ * The same, but through the webview round trip Ctrl+S goes through: the panel is
+ * sent each reference as an ID and sends that ID back, so the authored path is not
+ * on the wire at all and the writer has to rebuild it from the object graph.
+ */
+function saveAllThroughPanel(root) {
+  const content = loadContent(root, 'hu')
+  const files = {}
+  for (const [id, fp] of content.idToFilePath) {
+    if (path.basename(fp) === NS) continue
+    if (path.basename(fp) === 'episodes.yaml') continue
+    const obj = content.idToObject.get(id)
+    updateModelRefs(obj, serializeRefs(obj.references ?? []), content.idToObject)
+    saveFromModel(id, content)
+    files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
+  }
+  return files
+}
+
 const doc = (text) => yaml.load(text)
 const claims = (blocks) =>
   (blocks ?? []).flatMap((b) => (b?.type === 'claim' ? [b] : claims(b?.blocks)))
@@ -201,7 +228,7 @@ test('entity, claim and term slugs survive a save', () => {
   }, 'claim slugs, including one nested in a subsection')
 
   const rem = doc(files[path.join('knowledge-base', 'proba', 'remarks', 'proba-megjegyzes.yaml')])
-  assert.equal(rem.slug, 'proba-megjegyzes')
+  assert.ok(!('slug' in rem), 'a remark has no slug, and a save must not invent one')
   assert.equal(rem.terms['remark-term'].slug, 'megjegyzes-fogalom')
 
   const thm = doc(files[path.join('knowledge-base', 'proba', 'theorems', 'proba-tetel.yaml')])
@@ -216,19 +243,21 @@ test('a proof keeps its terms block, which the model does not represent', () => 
   assert.ok(proof.terms, 'terms block must not be deleted')
   assert.equal(proof.terms['proof-term'].slug, 'bizonyitas-fogalom')
   assert.equal(proof.terms['proof-term'].canonical, 'bizonyítás-fogalom')
-  assert.equal(proof.slug, 'proba-bizonyitas')
+  assert.ok(!('slug' in proof), 'a proof has no slug, and a save must not invent one')
   assert.equal(claims(proof.body)[0].slug, 'bizonyitas-allitas')
 })
 
-test('slug keeps its position: immediately after name', () => {
+const SLUGLESS_TYPES = ['proof', 'remark']
+
+test('slug keeps its position: immediately after name, on every type that has one', () => {
   const root = fixture()
   const files = saveAll(root)
   for (const [rel, text] of Object.entries(files)) {
-    const keys = Object.keys(doc(text))
-    assert.equal(keys[0], 'type', rel)
-    assert.equal(keys[1], 'name', rel)
-    assert.equal(keys[2], 'slug', rel)
-    assert.equal(keys[3], 'locale', rel)
+    const d = doc(text)
+    const head = SLUGLESS_TYPES.includes(d.type)
+      ? ['type', 'name', 'locale']
+      : ['type', 'name', 'slug', 'locale']
+    assert.deepEqual(Object.keys(d).slice(0, head.length), head, rel)
   }
 })
 
@@ -254,6 +283,13 @@ test('a resolvable target is rewritten as the same fully qualified name', () => 
   assert.equal(refs['a-definition'].target, 'definitions.proba-definicio')
   assert.equal(refs['a-claim'].target, 'definitions.proba-definicio.claims.top-level-claim')
   assert.equal(refs['a-proof'].target, 'theorems.proba-tetel.proofs.proba-bizonyitas')
+  // A remark, and a term inside one. The owner search behind these has to skip the
+  // NAMESPACE, which also lists every remark in its folder — picking the namespace
+  // ends the walk on a segment the grammar has no name for, and the target is then
+  // written back as no target at all.
+  assert.equal(refs['a-remark'].target, 'definitions.proba-definicio.remarks.proba-megjegyzes')
+  assert.equal(refs['a-remark-term'].target,
+    'definitions.proba-definicio.remarks.proba-megjegyzes.terms.remark-term')
 })
 
 test('an external target survives, including a scheme with no slashes', () => {
@@ -311,4 +347,25 @@ sections: []
   assert.throws(() => saveFromModel(id, content), /cannot write back|Saving would delete/)
   // And the file on disk is untouched, which is the point.
   assert.match(readFileSync(legacy, 'utf8'), /type: definition/)
+})
+
+test('a reference target is never silently dropped, saving through the panel', () => {
+  // The regression this exists for: on the wire a target is only an ID, so the
+  // authored path is gone by the time the file is written and every target has to
+  // be rebuilt by walking the object graph. A remark target could not be — the walk
+  // found the namespace that lists the remark instead of the definition that owns
+  // it — so opening a file and pressing Ctrl+S deleted it. 98 files in the content
+  // repo carry such a target.
+  const root = fixture()
+  for (const [rel, text] of Object.entries(saveAllThroughPanel(root))) {
+    for (const [key, entry] of Object.entries(doc(text).references ?? {})) {
+      assert.ok(entry.target, `${rel}: reference '${key}' lost its target`)
+    }
+  }
+})
+
+test('saving through the panel writes the same paths as saving from the model', () => {
+  const direct = chapterDoc(saveAll(fixture())).references
+  const panel  = chapterDoc(saveAllThroughPanel(fixture())).references
+  assert.deepEqual(panel, direct)
 })

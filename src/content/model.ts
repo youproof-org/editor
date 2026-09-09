@@ -113,10 +113,11 @@ export type ContentBlock =
 // `slug` is intentionally NOT modelled — the editor does not build URLs. It is
 // nonetheless PRESERVED on save, and that now covers three places rather than
 // one, because the knowledge base grew public per-node URLs:
-//   * entity level (definition/theorem/proof/remark, plus chapter/section) —
-//     saveFromModel merges into the loaded YAML instead of reconstructing it, so
-//     an unmodelled top-level key survives on its own; CANONICAL_ORDER lists
-//     `slug` so it also keeps its position in the file.
+//   * entity level (definition/theorem, plus chapter/section) — saveFromModel
+//     merges into the loaded YAML instead of reconstructing it, so an unmodelled
+//     top-level key survives on its own; CANONICAL_ORDER lists `slug` so it also
+//     keeps its position in the file. A proof and a remark carry no slug: each is
+//     addressed by its position in the list of the node that owns it.
 //   * `claim` blocks and `terms` entries — these ARE reconstructed field by field
 //     on save, so their `slug` has to be copied across explicitly, keyed by the
 //     claim/term name. See collectClaimSlugs in handlers.ts.
