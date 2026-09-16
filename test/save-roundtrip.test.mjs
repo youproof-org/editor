@@ -31,7 +31,12 @@ Module._load = function (request, ...rest) {
   return realLoad.call(this, request, ...rest)
 }
 
-const { saveFromModel, serializeRefs, updateModelRefs, updateModelTerms } = await import('../out/handlers.js')
+const {
+  saveFromModel,
+  serializeRefs, updateModelRefs,
+  serializeTerms, updateModelTerms,
+  serializeBlocks, updateModelBlocks,
+} = await import('../out/handlers.js')
 const { loadContent } = await import('../out/content/loader.js')
 
 const NS = 'namespace.yaml'
@@ -197,9 +202,16 @@ function saveAll(root) {
 }
 
 /**
- * The same, but through the webview round trip Ctrl+S goes through: the panel is
- * sent each reference as an ID and sends that ID back, so the authored path is not
- * on the wire at all and the writer has to rebuild it from the object graph.
+ * The same, but through the FULL webview round trip that Ctrl+S goes through:
+ * every block, term and reference is serialized out to the panel and fed straight
+ * back, untouched. Saving an unedited node this way must be a no-op.
+ *
+ * Whole-object, not references alone, because the wire is a WHITELIST in both
+ * directions — serializeBlock / serializeTerms choose what the panel sees, and
+ * applyWireToBlock / updateModelTerms choose what comes back. A field missing
+ * from either list vanishes silently on the way through, and saveFromModel is
+ * perfectly happy to write the result. That is invisible to a test that only
+ * exercises the model.
  */
 function saveAllThroughPanel(root) {
   const content = loadContent(root, 'hu')
@@ -208,6 +220,12 @@ function saveAllThroughPanel(root) {
     if (path.basename(fp) === NS) continue
     if (path.basename(fp) === 'episodes.yaml') continue
     const obj = content.idToObject.get(id)
+    for (const field of ['body', 'abstract', 'prerequisiteWarning', 'prologue', 'epilogue']) {
+      if (Array.isArray(obj[field])) {
+        obj[field] = updateModelBlocks(serializeBlocks(obj[field]), obj, content.idToObject)
+      }
+    }
+    if (Array.isArray(obj.terms)) updateModelTerms(obj, serializeTerms(obj.terms), content.idToObject)
     updateModelRefs(obj, serializeRefs(obj.references ?? []), content.idToObject)
     saveFromModel(id, content)
     files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
@@ -395,6 +413,48 @@ test('a slug-less claim collides on its NAME, which is what it anchors at', () =
   cs.find((c) => c.name === 'nested-claim').slug = ''
   cs.find((c) => c.name === 'top-level-claim').slug = 'nested-claim'
   saveShouldThrow(root, id, content, /both anchor at "nested-claim"/)
+})
+
+test('a slug survives the round trip through the panel', () => {
+  // The regression this pins: the panel wire is a whitelist, and `slug` was on
+  // neither side of it when claims and terms first gained one. A claim's slug was
+  // invisible in the editor and an edit to it went nowhere; a term's was worse —
+  // it came back `undefined` and the writer then dropped the key, deleting a slug
+  // that had only ever been missing from the serializer.
+  const root = fixture()
+  const before = saveAll(root)
+  const after = saveAllThroughPanel(root)
+  assert.deepEqual(after, before, 'the panel round trip must change nothing')
+
+  const d = doc(after[DEF_REL])
+  assert.equal(d.terms['first-term'].slug, 'elso-fogalom')
+  assert.equal(d.terms['second-term'].slug, 'masodik-fogalom')
+  assert.deepEqual(
+    Object.fromEntries(claims(d.body).map((c) => [c.name, c.slug])),
+    { 'top-level-claim': 'legfelso-allitas', 'nested-claim': 'beagyazott-allitas' },
+  )
+})
+
+test('a slug EDITED in the panel reaches the file', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+
+  const wireBlocks = serializeBlocks(obj.body)
+  const wireClaim = wireBlocks.find((b) => b.blockType === 'claim')
+  assert.equal(wireClaim.slug, 'legfelso-allitas', 'the panel is sent the current slug')
+  wireClaim.slug = 'panelbol-atirt'
+
+  const wireTerms = serializeTerms(obj.terms)
+  assert.equal(wireTerms[0].slug, 'elso-fogalom', 'the panel is sent the current term slug')
+  wireTerms.find((t) => t.name === 'first-term').slug = 'panelbol-atirt-fogalom'
+
+  obj.body = updateModelBlocks(wireBlocks, obj, content.idToObject)
+  updateModelTerms(obj, wireTerms, content.idToObject)
+  saveFromModel(id, content)
+
+  const d = readDef(root)
+  assert.equal(claims(d.body).find((c) => c.name === 'top-level-claim').slug, 'panelbol-atirt')
+  assert.equal(d.terms['first-term'].slug, 'panelbol-atirt-fogalom')
 })
 
 test('a claim and a term on one node MAY share a slug', () => {

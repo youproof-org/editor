@@ -1043,7 +1043,10 @@ function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock):
     }
     return;
   }
-  for (const f of ['content', 'leadIn', 'leadOut', 'formula', 'quote', 'author', 'title', 'name', 'src', 'alt', 'caption', 'size']) {
+  // Mirrors serializeBlock's list — see the note there. A field absent from `wire`
+  // is DELETED from the model, so anything the serializer does not send is lost
+  // here even if the model had it.
+  for (const f of ['content', 'leadIn', 'leadOut', 'formula', 'quote', 'author', 'title', 'name', 'slug', 'src', 'alt', 'caption', 'size']) {
     if (f in wire) model[f] = wire[f]; else delete model[f];
   }
   if (Array.isArray(wire['items'])) model['items'] = [...wire['items'] as unknown[]];
@@ -1056,7 +1059,7 @@ function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock):
   }
 }
 
-function updateModelBlocks(
+export function updateModelBlocks(
   wireBlocks: WireBlock[],
   parent: WireBlock,
   idToObject: Map<string, unknown>,
@@ -1085,9 +1088,13 @@ function collectBlockIds(blocks: WireBlock[] | undefined, out: Set<string>): voi
 
 // ─── Content serialization helpers ────────────────────────────────────────────
 
+// Every string field the webview edits has to be listed here, in
+// applyWireToBlock below, AND in blockToYaml. A field missing from this one is
+// invisible in the editor; missing from the next, an edit to it is silently
+// dropped. `slug` was missing from both when claims first gained one.
 function serializeBlock(b: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { id: b['id'], blockType: b['blockType'] };
-  for (const key of ['content', 'leadIn', 'leadOut', 'formula', 'name', 'src', 'alt', 'caption', 'size', 'quote', 'author', 'title']) {
+  for (const key of ['content', 'leadIn', 'leadOut', 'formula', 'name', 'slug', 'src', 'alt', 'caption', 'size', 'quote', 'author', 'title']) {
     if (typeof b[key] === 'string') result[key] = b[key];
   }
   if (Array.isArray(b['items']))  result['items']  = b['items'];
@@ -1101,7 +1108,7 @@ function serializeBlock(b: Record<string, unknown>): Record<string, unknown> {
   return result;
 }
 
-function serializeBlocks(blocks: unknown[]): Record<string, unknown>[] {
+export function serializeBlocks(blocks: unknown[]): Record<string, unknown>[] {
   return (blocks as Array<Record<string, unknown>>).map(serializeBlock);
 }
 
@@ -1112,9 +1119,13 @@ export function serializeRefs(raw: unknown[]): Array<Record<string, unknown>> {
   });
 }
 
-function serializeTerms(raw: unknown[]): Array<Record<string, unknown>> {
+// `slug` is not optional on the wire: updateModelTerms assigns whatever comes
+// back, so a term serialized without one returns `undefined` and the writer then
+// omits the key — deleting a slug that was only ever missing from THIS function.
+export function serializeTerms(raw: unknown[]): Array<Record<string, unknown>> {
   return (raw as Array<Record<string, unknown>>).map(t => ({
-    id: t['id'], name: t['name'], display: t['display'], canonical: t['canonical'],
+    id: t['id'], name: t['name'], slug: t['slug'] ?? '',
+    display: t['display'], canonical: t['canonical'],
     synonyms: Array.isArray(t['synonyms']) ? t['synonyms'] : [],
   }));
 }
