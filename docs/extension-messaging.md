@@ -138,7 +138,8 @@ interface ContentSectionData extends ContentObjectBase {
 
 interface ContentTerm {
   id:        string;
-  name:      string;
+  name:      string;   // the map key in YAML; English, the id references resolve against
+  slug:      string;   // the localized anchor segment; '' when the file has none
   display:   string;
   canonical: string;
   synonyms:  string[];
@@ -160,6 +161,8 @@ interface ContentTargetObject {
 ```
 
 `ContentBlock` is a discriminated union of 12 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`, `recall`.
+
+A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a term, `name` is the English id a reference resolves against and `slug` is the localized anchor segment, `''` when the file has none — legal content, since the site falls back to `name`. A save is refused if a non-empty slug is not lowercase kebab-case, or if two claims (or two terms) on one node resolve to the same anchor.
 
 ---
 

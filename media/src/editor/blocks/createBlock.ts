@@ -24,7 +24,7 @@ export function createEmptyBlock(type: CreatableBlockType): ContentBlock {
   switch (type) {
     case 'narrative':       return { id, blockType: 'narrative',       content: '' };
     case 'formula':         return { id, blockType: 'formula',         content: '' };
-    case 'claim':           return { id, blockType: 'claim',           name: '',    content: '' };
+    case 'claim':           return { id, blockType: 'claim',           name: '',    slug: '', content: '' };
     case 'ordered-list':    return { id, blockType: 'ordered-list',    items: [''] };
     case 'unordered-list':  return { id, blockType: 'unordered-list',  items: [''] };
     case 'typewriter':      return { id, blockType: 'typewriter',      rows:  [''] };

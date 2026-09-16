@@ -177,7 +177,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
       const synonyms = Array.isArray(obj['synonyms'])
         ? (obj['synonyms'] as unknown[]).filter((s): s is string => typeof s === 'string')
         : [];
-      const term: Term = { id, name: key, display: str(obj, 'display', ''), canonical: str(obj, 'canonical', key), synonyms, parent };
+      const term: Term = { id, name: key, slug: str(obj, 'slug', ''), display: str(obj, 'display', ''), canonical: str(obj, 'canonical', key), synonyms, parent };
       reg(id, term);
       return [term];
     });
@@ -277,7 +277,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
           block = rec; break;
         }
         case 'claim':
-          block = { id, blockType: 'claim', name: str(b, 'name', id), content: str(b, 'content', ''), formula: b['formula'] as string | undefined, context, parent }; break;
+          block = { id, blockType: 'claim', name: str(b, 'name', id), slug: str(b, 'slug', ''), content: str(b, 'content', ''), formula: b['formula'] as string | undefined, context, parent }; break;
         default: continue;
       }
 
