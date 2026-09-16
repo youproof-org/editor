@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ContentTerm } from '../shared/types';
+import { deriveSlugFromCanonical, isValidSlug } from '../shared/slug';
 import StringListEditor from './StringListEditor';
 
 interface Props {
@@ -11,8 +12,8 @@ interface Props {
 }
 
 export default function TermsPanel({ terms, onTermChange, highlightedName, onInsert, onSelect }: Props) {
-  const [colWidths, setColWidths] = useState<(number | null)[]>([null, null, null]);
-  const resizeState       = useRef<{ col: 0 | 1 | 2; startX: number; startW: number } | null>(null);
+  const [colWidths, setColWidths] = useState<(number | null)[]>([null, null, null, null]);
+  const resizeState       = useRef<{ col: 0 | 1 | 2 | 3; startX: number; startW: number } | null>(null);
   const highlightedRowRef = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => {
@@ -43,44 +44,40 @@ export default function TermsPanel({ terms, onTermChange, highlightedName, onIns
       <table className="refs-table refs-table--terms">
         <colgroup>
           <col style={{ width: 28 }} />
-          <col style={colWidths[0] != null ? { width: colWidths[0] } : undefined} />
-          <col style={colWidths[1] != null ? { width: colWidths[1] } : undefined} />
-          <col style={colWidths[2] != null ? { width: colWidths[2] } : undefined} />
+          {colWidths.map((w, i) => (
+            <col key={i} style={w != null ? { width: w } : undefined} />
+          ))}
           <col />
         </colgroup>
         <thead>
           <tr>
             <th className="refs-table-th--icon" />
-            <th>Name<span className="col-resizer"
-              onMouseDown={e => {
-                e.preventDefault();
-                const th = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
-                const startW = colWidths[0] ?? th.getBoundingClientRect().width;
-                resizeState.current = { col: 0, startX: e.clientX, startW };
-              }}
-              onDoubleClick={e => { e.preventDefault(); setColWidths(prev => { const next = [...prev]; next[0] = null; return next; }); }} /></th>
-            <th>Display<span className="col-resizer"
-              onMouseDown={e => {
-                e.preventDefault();
-                const th = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
-                const startW = colWidths[1] ?? th.getBoundingClientRect().width;
-                resizeState.current = { col: 1, startX: e.clientX, startW };
-              }}
-              onDoubleClick={e => { e.preventDefault(); setColWidths(prev => { const next = [...prev]; next[1] = null; return next; }); }} /></th>
-            <th>Canonical<span className="col-resizer"
-              onMouseDown={e => {
-                e.preventDefault();
-                const th = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
-                const startW = colWidths[2] ?? th.getBoundingClientRect().width;
-                resizeState.current = { col: 2, startX: e.clientX, startW };
-              }}
-              onDoubleClick={e => { e.preventDefault(); setColWidths(prev => { const next = [...prev]; next[2] = null; return next; }); }} /></th>
+            {(['Name', 'Slug', 'Display', 'Canonical'] as const).map((label, i) => (
+              <th key={label}>{label}<span className="col-resizer"
+                onMouseDown={e => {
+                  e.preventDefault();
+                  const th = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+                  const startW = colWidths[i] ?? th.getBoundingClientRect().width;
+                  resizeState.current = { col: i as 0 | 1 | 2 | 3, startX: e.clientX, startW };
+                }}
+                onDoubleClick={e => { e.preventDefault(); setColWidths(prev => { const next = [...prev]; next[i] = null; return next; }); }} /></th>
+            ))}
             <th>Synonyms</th>
           </tr>
         </thead>
         <tbody>
           {terms.map(term => {
             const isDup = terms.filter(t => t.name === term.name).length > 1;
+            // Anchors collide on the EFFECTIVE slug, since a term with none is
+            // cited by its key — the same rule the site build applies, so the
+            // editor flags exactly what a save would be refused for.
+            const anchor    = term.slug || term.name;
+            const anchorDup = terms.filter(t => (t.slug || t.name) === anchor).length > 1;
+            const slugState =
+              anchorDup                       ? 'invalid'
+              : term.slug === ''              ? 'warn'
+              : !isValidSlug(term.slug)       ? 'invalid'
+              : 'ok';
             return (
               <tr key={term.id}
                 ref={term.name === highlightedName ? highlightedRowRef : null}
@@ -102,6 +99,21 @@ export default function TermsPanel({ terms, onTermChange, highlightedName, onIns
                 </td>
                 <td>
                   <input
+                    className={`ref-input${slugState === 'ok' ? '' : ` ref-input--${slugState}`}`}
+                    value={term.slug}
+                    placeholder={deriveSlugFromCanonical(term.canonical)}
+                    title={
+                      slugState === 'warn'
+                        ? `No slug — this term is cited in English, as fogalmak.${term.name}.`
+                        : slugState === 'invalid'
+                          ? 'Not a usable anchor: it must be lowercase kebab-case and unique on this node. Saving is blocked until it is.'
+                          : undefined
+                    }
+                    onChange={e => onTermChange({ ...term, slug: e.target.value })}
+                  />
+                </td>
+                <td>
+                  <input
                     className="ref-input"
                     value={term.display}
                     onChange={e => onTermChange({ ...term, display: e.target.value })}
@@ -111,7 +123,22 @@ export default function TermsPanel({ terms, onTermChange, highlightedName, onIns
                   <input
                     className="ref-input"
                     value={term.canonical}
-                    onChange={e => onTermChange({ ...term, canonical: e.target.value })}
+                    onChange={e => {
+                      const canonical = e.target.value;
+                      // Keep the slug in step with `canonical` while it is still
+                      // the derived value — and stop the moment it is not. The
+                      // test is stateless on purpose: comparing against the
+                      // derivation of the PREVIOUS canonical distinguishes "never
+                      // filled in" and "auto-filled" from "written by hand"
+                      // without tracking which fields have been touched, so it
+                      // survives a remount and a reload.
+                      const derived = term.slug === '' || term.slug === deriveSlugFromCanonical(term.canonical);
+                      onTermChange({
+                        ...term,
+                        canonical,
+                        slug: derived ? deriveSlugFromCanonical(canonical) : term.slug,
+                      });
+                    }}
                   />
                 </td>
                 <td>

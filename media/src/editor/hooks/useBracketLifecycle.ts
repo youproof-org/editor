@@ -37,7 +37,7 @@ export function useBracketLifecycle({ setDraft, markDirty }: Params) {
         if (!('terms' in d)) return d;
         if (prev === null) {
           if (d.terms.find(t => t.name === curr.name)) return d;
-          return { ...d, terms: [...d.terms, { id: crypto.randomUUID(), name: curr.name, display: '', canonical: '', synonyms: [] }] };
+          return { ...d, terms: [...d.terms, { id: crypto.randomUUID(), name: curr.name, slug: '', display: '', canonical: '', synonyms: [] }] };
         }
         const prevEntry      = d.terms.find(t => t.name === prev.name);
         const currEntry      = d.terms.find(t => t.name === curr.name);
@@ -51,7 +51,7 @@ export function useBracketLifecycle({ setDraft, markDirty }: Params) {
         if (onlyOccurrence && prevEntry) {
           return { ...d, terms: d.terms.map(t => t.id === prevEntry.id ? { ...t, name: curr.name } : t) };
         }
-        return { ...d, terms: [...d.terms, { id: crypto.randomUUID(), name: curr.name, display: prevEntry?.display ?? '', canonical: prevEntry?.canonical ?? '', synonyms: prevEntry?.synonyms ?? [] }] };
+        return { ...d, terms: [...d.terms, { id: crypto.randomUUID(), name: curr.name, slug: prevEntry?.slug ?? '', display: prevEntry?.display ?? '', canonical: prevEntry?.canonical ?? '', synonyms: prevEntry?.synonyms ?? [] }] };
       }
     });
     setActiveItem(curr);

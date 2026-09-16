@@ -622,11 +622,11 @@ export function saveFromModel(id: string, content: LoadedContent): void {
   // field on save.
   const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
-  // Read the unmodelled `slug`s off the file BEFORE any field is rewritten below.
-  const claimSlugs = collectClaimSlugs(yamlDoc);
-  const origTerms = (yamlDoc['terms'] && typeof yamlDoc['terms'] === 'object' && !Array.isArray(yamlDoc['terms']))
-    ? yamlDoc['terms'] as Record<string, unknown>
-    : {};
+  // Claim and term slugs are modelled fields now (YP-173), so nothing has to be
+  // rescued off the file first. What does have to happen first is the check: a
+  // slug the site build would reject must stop the save while the file on disk is
+  // still intact, not halfway through being rewritten.
+  assertSlugsAreSound(obj, type);
 
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
@@ -635,7 +635,7 @@ export function saveFromModel(id: string, content: LoadedContent): void {
         return;
       }
       const orig = (yamlDoc[yamlField] ?? []) as WireBlock[];
-      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content, claimSlugs);
+      yamlDoc[yamlField] = mergeBlocks(orig, modelBlocks, content);
     };
     merge('abstract',             obj['abstract']            as WireBlock[]);
     merge('prerequisite-warning', obj['prerequisiteWarning'] as WireBlock[]);
@@ -645,7 +645,7 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     const modelBody = Array.isArray(obj['body']) ? obj['body'] as WireBlock[] : [];
     if (modelBody.length > 0) {
       const orig = (yamlDoc['body'] ?? []) as WireBlock[];
-      yamlDoc['body'] = mergeBlocks(orig, modelBody, content, claimSlugs);
+      yamlDoc['body'] = mergeBlocks(orig, modelBody, content);
     } else {
       delete yamlDoc['body'];
     }
@@ -657,14 +657,11 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     for (const t of modelTermsArr) {
       const name  = t['name'] as string;
       const entry: Record<string, unknown> = {};
-      // Unmodelled `slug`, carried over from the file keyed by the term name —
-      // same rule as claim slugs (see collectClaimSlugs). First key in the entry,
-      // since the map key is the term's name.
-      const prev = origTerms[name];
-      const slug = prev && typeof prev === 'object' && !Array.isArray(prev)
-        ? (prev as Record<string, unknown>)['slug']
-        : undefined;
-      if (typeof slug === 'string') entry['slug'] = slug;
+      // `slug` first, since the map key is the term's name and the slug belongs
+      // beside its identifier — the same placement the addressable types use.
+      // Omitted when empty: the site falls back to the map key, so an absent slug
+      // is legal content rather than an error, and writing `slug: ''` would not be.
+      if (t['slug']) entry['slug'] = t['slug'];
       if (t['display'])   entry['display']   = t['display'];
       if (t['canonical']) entry['canonical'] = t['canonical'];
       if (Array.isArray(t['synonyms']) && (t['synonyms'] as unknown[]).length)
@@ -764,40 +761,87 @@ function blockHeader(wire: WireBlock, type: string): WireBlock {
 }
 
 /**
- * Claim `slug`s (and term `slug`s, below) are authored in the content YAML but are
- * deliberately NOT modelled — the editor has no UI for them (see model.ts). They
- * must therefore be carried across a save from the file on disk.
+ * Refuse a save that would write a claim or term slug the site build rejects.
  *
- * Keyed by the claim `name`, never by position: the editor lets an author insert,
- * delete and reorder blocks, so an index-paired lookup would transplant a slug
- * onto a different claim. A *renamed* claim legitimately loses its slug — the slug
- * describes the claim's content, so a rename invalidates it, and re-deriving it is
- * an authoring decision rather than something to guess here.
+ * Two rules, both mirrored from the services repo's `lib/content/graph.ts` so the
+ * editor cannot green-light something CI or the build then fails on:
+ *
+ *  - SHAPE. A slug is a segment of the same dotted grammar a name is, so a `.`, a
+ *    space or a capital makes the anchor that cites it unparseable. Checked only
+ *    when the slug is non-empty — an ABSENT slug is legal (the site falls back to
+ *    the English `name`), just undesirable, and that case is surfaced as a warning
+ *    in the webview rather than a refusal here. Blocking it would make a
+ *    half-written node unsaveable.
+ *  - COLLISION, on the EFFECTIVE slug (`slug || name`, `slug || key`), which is
+ *    what the anchor actually resolves to. Comparing authored slugs alone would
+ *    let through a claim slugged `foo` beside a slug-less claim *named* `foo` —
+ *    two claims, one anchor. Scoped per kind and per node: a claim and a term on
+ *    one node may share, since they sit under distinct `allitasok.` / `fogalmak.`
+ *    segments.
+ *
+ * Throwing is the mechanism: messageServer turns it into a response error, the
+ * webview shows it, and the node stays dirty with the file untouched.
  */
-function collectClaimSlugs(yamlDoc: Record<string, unknown>): Map<string, string> {
-  const slugs = new Map<string, string>();
+function assertSlugsAreSound(obj: WireBlock, type: string): void {
+  const badShape = (kind: string, id: string, slug: string): never => {
+    throw new Error(
+      `The ${kind} "${id}" has slug ${JSON.stringify(slug)}, which is not a valid identifier: ` +
+        `it must be lowercase kebab-case (${IDENTIFIER_RE.source}). A slug is a segment of the ` +
+        `anchor path that cites it, so it cannot contain a '.', a space or a capital.`,
+    );
+  };
+  const collide = (kind: string, a: string, b: string, anchor: string): never => {
+    throw new Error(
+      `The ${kind}s "${a}" and "${b}" both anchor at "${anchor}" on this node. Two ${kind}s ` +
+        `cannot share one anchor. (A ${kind} with no slug of its own anchors at its name, ` +
+        `which is what collides here when only one of the two is slugged.)`,
+    );
+  };
+
+  const claims: { name: string; slug: string }[] = [];
   const walk = (blocks: unknown): void => {
     if (!Array.isArray(blocks)) return;
     for (const b of blocks) {
       if (!b || typeof b !== 'object') continue;
-      const blk = b as Record<string, unknown>;
-      if (blk['type'] === 'claim' && typeof blk['name'] === 'string' && typeof blk['slug'] === 'string') {
-        slugs.set(blk['name'], blk['slug']);
+      const blk = b as WireBlock;
+      if (blk['blockType'] === 'claim') {
+        claims.push({ name: String(blk['name'] ?? ''), slug: String(blk['slug'] ?? '') });
       }
+      // A claim may sit inside a `subsection` or `details`; the anchor is
+      // node-scoped either way, so nesting is irrelevant to both rules above.
       walk(blk['blocks']);
     }
   };
-  for (const field of ['body', 'abstract', 'prerequisite-warning', 'prologue', 'epilogue']) {
-    walk(yamlDoc[field]);
+  for (const field of ['body', 'abstract', 'prerequisiteWarning', 'prologue', 'epilogue']) {
+    walk(obj[field]);
   }
-  return slugs;
+
+  const claimAnchors = new Map<string, string>();
+  for (const c of claims) {
+    if (c.slug && !IDENTIFIER_RE.test(c.slug)) badShape('claim', c.name, c.slug);
+    const anchor = c.slug || c.name;
+    const prior = claimAnchors.get(anchor);
+    if (prior !== undefined && prior !== c.name) collide('claim', prior, c.name, anchor);
+    claimAnchors.set(anchor, c.name);
+  }
+
+  if (!TERM_BEARING_TYPES.includes(type)) return;
+  const termAnchors = new Map<string, string>();
+  for (const t of (Array.isArray(obj['terms']) ? obj['terms'] as WireBlock[] : [])) {
+    const name = String(t['name'] ?? '');
+    const slug = String(t['slug'] ?? '');
+    if (slug && !IDENTIFIER_RE.test(slug)) badShape('term', name, slug);
+    const anchor = slug || name;
+    const prior = termAnchors.get(anchor);
+    if (prior !== undefined && prior !== name) collide('term', prior, name, anchor);
+    termAnchors.set(anchor, name);
+  }
 }
 
 function blockToYaml(
   wire: WireBlock,
   orig: WireBlock,
   content: LoadedContent,
-  claimSlugs: Map<string, string>,
 ): WireBlock {
   const bt = wire['blockType'] as string;
   if (bt === 'embed' || bt === 'recall') {
@@ -840,8 +884,9 @@ function blockToYaml(
             `path that references it, so it cannot contain a '.', a space or a capital.`,
         );
       }
-      const slug = claimSlugs.get(claimName);
-      if (slug) r['slug'] = slug;
+      // Shape and collisions were settled in assertSlugsAreSound before the first
+      // field was rewritten. Omitted when empty — the site falls back to `name`.
+      if (wire['slug']) r['slug'] = wire['slug'];
       r['content'] = wire['content'];
       if (wire['formula']) r['formula'] = wire['formula'];
       return r;
@@ -882,7 +927,7 @@ function blockToYaml(
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'subsection');
       r['title']  = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
       return r;
     }
     case 'details': {
@@ -890,7 +935,7 @@ function blockToYaml(
       const wireChildren = ((wire['blocks'] ?? []) as WireBlock[]);
       const r = blockHeader(wire, 'details');
       if (wire['title']) r['title'] = wire['title'];
-      r['blocks'] = mergeBlocks(origChildren, wireChildren, content, claimSlugs);
+      r['blocks'] = mergeBlocks(origChildren, wireChildren, content);
       return r;
     }
     default: return orig;
@@ -901,21 +946,23 @@ function mergeBlocks(
   orig: WireBlock[],
   wire: WireBlock[],
   content: LoadedContent,
-  claimSlugs: Map<string, string>,
 ): WireBlock[] {
-  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content, claimSlugs));
+  return wire.map((w, i) => blockToYaml(w, orig[i] ?? {}, content));
 }
 
-function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToObject: Map<string, unknown>): void {
+// Exported for the round-trip test (test/save-roundtrip.test.mjs): this is the
+// webview's half of a term save, where a dropped field would bite before
+// saveFromModel ever sees it. Not part of the extension's public surface.
+export function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToObject: Map<string, unknown>): void {
   const modelTerms = Array.isArray(obj['terms']) ? obj['terms'] as WireBlock[] : [];
   obj['terms'] = incoming.map(t => {
     const existing = modelTerms.find(m => m['id'] === t.id);
     if (existing) {
-      existing['name'] = t.name; existing['display'] = t.display;
+      existing['name'] = t.name; existing['slug'] = t.slug; existing['display'] = t.display;
       existing['canonical'] = t.canonical; existing['synonyms'] = t.synonyms;
       return existing;
     }
-    const newTerm: WireBlock = { id: t.id, name: t.name, display: t.display, canonical: t.canonical, synonyms: t.synonyms, parent: obj };
+    const newTerm: WireBlock = { id: t.id, name: t.name, slug: t.slug, display: t.display, canonical: t.canonical, synonyms: t.synonyms, parent: obj };
     idToObject.set(t.id, newTerm);
     return newTerm;
   });

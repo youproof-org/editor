@@ -13,6 +13,10 @@ export interface Labels { canonical: string; cases?: Record<string, LabelCase>; 
 export interface Term {
   id: string;
   name: string;
+  // The localized anchor segment, `fogalmak.{slug}` on the page that renders the
+  // owning node. Empty when the file has none — legal content, since the site
+  // falls back to the term's key, so the editor must be able to represent it.
+  slug: string;
   display: string;
   canonical: string;
   synonyms: string[];
@@ -96,7 +100,7 @@ export interface SubsectionBlock   extends BlockBase { blockType: 'subsection'; 
 export interface DetailsBlock      extends BlockBase { blockType: 'details';        title?: string; blocks: ContentBlock[]; }
 export interface EmbedBlock        extends BlockBase { blockType: 'embed';          target: RefTarget; showTitle?: boolean; }
 export interface RecallBlock       extends BlockBase { blockType: 'recall';         target: RefTarget; }
-export interface ClaimBlock        extends BlockBase { blockType: 'claim';          name: string; content: string; formula?: string; }
+export interface ClaimBlock        extends BlockBase { blockType: 'claim';          name: string; slug: string; content: string; formula?: string; }
 
 export type ContentBlock =
   | NarrativeBlock | FormulaBlock | FigureBlock
@@ -110,19 +114,23 @@ export type ContentBlock =
 // apps/website/lib/content/types.ts). It is modelled here because the editor
 // loads/edits exactly one locale at a time (see loader.ts's locale filter).
 //
-// `slug` is intentionally NOT modelled — the editor does not build URLs. It is
-// nonetheless PRESERVED on save, and that now covers three places rather than
-// one, because the knowledge base grew public per-node URLs:
-//   * entity level (definition/theorem, plus chapter/section) — saveFromModel
-//     merges into the loaded YAML instead of reconstructing it, so an unmodelled
-//     top-level key survives on its own; CANONICAL_ORDER lists `slug` so it also
-//     keeps its position in the file. A proof and a remark carry no slug: each is
-//     addressed by its position in the list of the node that owns it.
-//   * `claim` blocks and `terms` entries — these ARE reconstructed field by field
-//     on save, so their `slug` has to be copied across explicitly, keyed by the
-//     claim/term name. See collectClaimSlugs in handlers.ts.
-// Adding a new unmodelled sub-field to a claim or a term means extending that
-// copy step too, or the first save in the editor deletes it.
+// `slug` is handled two different ways, because the editor edits one of them and
+// not the other:
+//   * ENTITY level (definition/theorem, plus chapter/section) — NOT modelled. The
+//     editor does not build URLs, so it has no reason to. It survives a save
+//     because saveFromModel merges into the loaded YAML instead of reconstructing
+//     it, so an unmodelled top-level key is simply left alone; CANONICAL_ORDER
+//     lists `slug` so it also keeps its position in the file. A proof and a remark
+//     carry no slug: each is addressed by its position in the list of the node
+//     that owns it.
+//   * `claim` blocks and `terms` entries — MODELLED and edited (YP-173). These are
+//     reconstructed field by field on save, so before they were modelled their
+//     slug had to be copied off the file and keyed back by name, which meant a
+//     claim created here never got one and a renamed claim silently lost one.
+//     Both now round-trip as ordinary fields.
+// Adding a new unmodelled sub-field to a claim or a term still needs care: the
+// writer rebuilds those objects key by key, so anything it does not know about is
+// dropped on the first save.
 
 export interface Book {
   id: string; filePath: string; type: 'book';
