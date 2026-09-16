@@ -87,7 +87,7 @@ interface ContentBlockBase { id: string; }
 
 export interface ContentNarrativeBlock     extends ContentBlockBase { blockType: 'narrative';       content: string; }
 export interface ContentFormulaBlock       extends ContentBlockBase { blockType: 'formula';         leadIn?: string; content: string; leadOut?: string; }
-export interface ContentClaimBlock         extends ContentBlockBase { blockType: 'claim';           name: string; content: string; formula?: string; }
+export interface ContentClaimBlock         extends ContentBlockBase { blockType: 'claim';           name: string; slug: string; content: string; formula?: string; }
 export interface ContentOrderedListBlock   extends ContentBlockBase { blockType: 'ordered-list';    leadIn?: string; items: string[]; }
 export interface ContentUnorderedListBlock extends ContentBlockBase { blockType: 'unordered-list';  leadIn?: string; items: string[]; }
 export interface ContentTypewriterBlock    extends ContentBlockBase { blockType: 'typewriter';      leadIn?: string; rows: string[]; }
@@ -106,7 +106,7 @@ export type ContentBlock =
 
 // ─── Term / reference types ───────────────────────────────────────────────────
 
-export interface ContentTerm      { id: string; name: string; display: string; canonical: string; synonyms: string[]; }
+export interface ContentTerm      { id: string; name: string; slug: string; display: string; canonical: string; synonyms: string[]; }
 export interface ContentReference { id: string; name: string; display: string; targetId?: string; }
 
 // ─── Content object data (discriminated by type) ──────────────────────────────

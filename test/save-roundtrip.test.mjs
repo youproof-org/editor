@@ -1,14 +1,20 @@
 // Round-trip guard for the editor's YAML writer.
 //
 // The knowledge base carries public per-node URLs, so a definition, a theorem and
-// every `claim` and `terms` entry has a `slug` that the editor does NOT model. A
-// proof and a remark have none — each is addressed by its position in the list of
-// the node that owns it. Claims and terms are reconstructed field by field on
-// save, so without explicit carry-over the first save in the editor silently
-// deletes their slug — that is the regression this file exists to catch. It also
-// pins two neighbouring invariants: a proof's `terms` block survives (the model
-// has no `Proof.terms`, so an empty model must not be read as "delete"), and
-// saving is idempotent.
+// every `claim` and `terms` entry has a `slug`. A proof and a remark have none —
+// each is addressed by its position in the list of the node that owns it.
+//
+// The ENTITY-level slug is still unmodelled: it survives because saveFromModel
+// merges into the loaded YAML rather than rebuilding it. Claim and term slugs ARE
+// modelled since YP-173, and are reconstructed field by field on save, so a
+// writer that forgets one deletes it — that is the regression this file exists to
+// catch. It also pins what modelling them bought: a renamed claim keeps its slug,
+// where the old name-keyed carry-over dropped it.
+//
+// Alongside that it pins three neighbouring invariants: a proof's `terms` block
+// survives (the model has no `Proof.terms`, so an empty model must not be read as
+// "delete"), a slug the site build would reject is refused here rather than
+// written, and saving is idempotent.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
@@ -25,7 +31,12 @@ Module._load = function (request, ...rest) {
   return realLoad.call(this, request, ...rest)
 }
 
-const { saveFromModel, serializeRefs, updateModelRefs } = await import('../out/handlers.js')
+const {
+  saveFromModel,
+  serializeRefs, updateModelRefs,
+  serializeTerms, updateModelTerms,
+  serializeBlocks, updateModelBlocks,
+} = await import('../out/handlers.js')
 const { loadContent } = await import('../out/content/loader.js')
 
 const NS = 'namespace.yaml'
@@ -191,9 +202,16 @@ function saveAll(root) {
 }
 
 /**
- * The same, but through the webview round trip Ctrl+S goes through: the panel is
- * sent each reference as an ID and sends that ID back, so the authored path is not
- * on the wire at all and the writer has to rebuild it from the object graph.
+ * The same, but through the FULL webview round trip that Ctrl+S goes through:
+ * every block, term and reference is serialized out to the panel and fed straight
+ * back, untouched. Saving an unedited node this way must be a no-op.
+ *
+ * Whole-object, not references alone, because the wire is a WHITELIST in both
+ * directions — serializeBlock / serializeTerms choose what the panel sees, and
+ * applyWireToBlock / updateModelTerms choose what comes back. A field missing
+ * from either list vanishes silently on the way through, and saveFromModel is
+ * perfectly happy to write the result. That is invisible to a test that only
+ * exercises the model.
  */
 function saveAllThroughPanel(root) {
   const content = loadContent(root, 'hu')
@@ -202,6 +220,12 @@ function saveAllThroughPanel(root) {
     if (path.basename(fp) === NS) continue
     if (path.basename(fp) === 'episodes.yaml') continue
     const obj = content.idToObject.get(id)
+    for (const field of ['body', 'abstract', 'prerequisiteWarning', 'prologue', 'epilogue']) {
+      if (Array.isArray(obj[field])) {
+        obj[field] = updateModelBlocks(serializeBlocks(obj[field]), obj, content.idToObject)
+      }
+    }
+    if (Array.isArray(obj.terms)) updateModelTerms(obj, serializeTerms(obj.terms), content.idToObject)
     updateModelRefs(obj, serializeRefs(obj.references ?? []), content.idToObject)
     saveFromModel(id, content)
     files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
@@ -266,6 +290,185 @@ test('saving is idempotent', () => {
   const first = saveAll(root)
   const second = saveAll(root)
   assert.deepEqual(second, first, 'a second save must not change any byte')
+})
+
+// ---------------------------------------------------------------------------
+// Claim and term slugs as MODELLED fields (YP-173)
+//
+// Before they were modelled, the writer rescued them off the file and keyed them
+// back by name. That made a slug un-editable, gave a newly created claim none at
+// all, and silently dropped one on rename. These pin the replacement.
+// ---------------------------------------------------------------------------
+
+const DEF_REL = path.join('knowledge-base', 'proba', 'definitions', 'proba-definicio.yaml')
+
+/** The loaded model object for a file, plus the content bundle it belongs to. */
+function nodeFor(root, rel) {
+  const content = loadContent(root, 'hu')
+  for (const [id, fp] of content.idToFilePath) {
+    if (path.relative(root, fp) === rel) return { content, id, obj: content.idToObject.get(id) }
+  }
+  throw new Error(`no loaded node for ${rel}`)
+}
+
+/** Every claim in a model object's body, including ones nested in a subsection. */
+const modelClaims = (blocks) =>
+  (blocks ?? []).flatMap((b) => (b?.blockType === 'claim' ? [b] : modelClaims(b?.blocks)))
+
+const readDef = (root) => doc(readFileSync(path.join(root, DEF_REL), 'utf8'))
+
+test('a claim slug edited in the model is written to the file', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'top-level-claim').slug = 'atirt-allitas'
+  saveFromModel(id, content)
+
+  const written = Object.fromEntries(claims(readDef(root).body).map((c) => [c.name, c.slug]))
+  assert.equal(written['top-level-claim'], 'atirt-allitas')
+  assert.equal(written['nested-claim'], 'beagyazott-allitas', 'the sibling is untouched')
+})
+
+test('renaming a claim KEEPS its slug', () => {
+  // The behaviour change. The old carry-over was keyed by name, so a rename made
+  // the lookup miss and the slug vanish from the file.
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'top-level-claim').name = 'atnevezett-allitas'
+  saveFromModel(id, content)
+
+  const written = Object.fromEntries(claims(readDef(root).body).map((c) => [c.name, c.slug]))
+  assert.equal(written['atnevezett-allitas'], 'legfelso-allitas')
+  assert.ok(!('top-level-claim' in written), 'the old name is gone')
+})
+
+test('an empty slug writes no key at all, on a claim and on a term', () => {
+  // Legal content: the site falls back to the English id, so the page still
+  // renders. `slug: ''` would NOT be legal — the build rejects the shape.
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'nested-claim').slug = ''
+  obj.terms.find((t) => t.name === 'second-term').slug = ''
+  saveFromModel(id, content)
+
+  const d = readDef(root)
+  const nested = claims(d.body).find((c) => c.name === 'nested-claim')
+  assert.ok(!('slug' in nested), 'no empty slug key on the claim')
+  assert.ok(!('slug' in d.terms['second-term']), 'no empty slug key on the term')
+  assert.equal(claims(d.body).find((c) => c.name === 'top-level-claim').slug, 'legfelso-allitas')
+})
+
+test('a term slug survives the webview round trip', () => {
+  // updateModelTerms is the webview's half of a term save; a field it forgets to
+  // copy never reaches saveFromModel in the first place.
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  const incoming = obj.terms.map((t) => ({
+    id: t.id, name: t.name, slug: t.slug, display: t.display,
+    canonical: t.canonical, synonyms: t.synonyms,
+  }))
+  incoming.find((t) => t.name === 'first-term').slug = 'atirt-fogalom'
+  updateModelTerms(obj, incoming, content.idToObject)
+  saveFromModel(id, content)
+
+  const d = readDef(root)
+  assert.equal(d.terms['first-term'].slug, 'atirt-fogalom')
+  assert.equal(d.terms['second-term'].slug, 'masodik-fogalom')
+})
+
+// ── Refusals. Each mirrors a rule the services repo's graph.ts enforces, so the
+// editor cannot write something CI or the site build then fails on. ──
+
+const saveShouldThrow = (root, id, content, re) =>
+  assert.throws(() => saveFromModel(id, content), re)
+
+test('a malformed slug is refused, and the file is left untouched', () => {
+  const root = fixture()
+  const before = readFileSync(path.join(root, DEF_REL), 'utf8')
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'top-level-claim').slug = 'Nem Kebab.Case'
+  saveShouldThrow(root, id, content, /not a valid identifier/)
+  assert.equal(readFileSync(path.join(root, DEF_REL), 'utf8'), before, 'nothing was written')
+})
+
+test('a malformed TERM slug is refused too', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  obj.terms.find((t) => t.name === 'first-term').slug = 'Rossz_Alak'
+  saveShouldThrow(root, id, content, /not a valid identifier/)
+})
+
+test('two claims on one node cannot share an anchor', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'nested-claim').slug = 'legfelso-allitas'
+  saveShouldThrow(root, id, content, /both anchor at "legfelso-allitas"/)
+})
+
+test('a slug-less claim collides on its NAME, which is what it anchors at', () => {
+  // The fallback rule: `slug ?? name`. Comparing authored slugs alone would let
+  // this pair through, and the site build would then reject it.
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  const cs = modelClaims(obj.body)
+  cs.find((c) => c.name === 'nested-claim').slug = ''
+  cs.find((c) => c.name === 'top-level-claim').slug = 'nested-claim'
+  saveShouldThrow(root, id, content, /both anchor at "nested-claim"/)
+})
+
+test('a slug survives the round trip through the panel', () => {
+  // The regression this pins: the panel wire is a whitelist, and `slug` was on
+  // neither side of it when claims and terms first gained one. A claim's slug was
+  // invisible in the editor and an edit to it went nowhere; a term's was worse —
+  // it came back `undefined` and the writer then dropped the key, deleting a slug
+  // that had only ever been missing from the serializer.
+  const root = fixture()
+  const before = saveAll(root)
+  const after = saveAllThroughPanel(root)
+  assert.deepEqual(after, before, 'the panel round trip must change nothing')
+
+  const d = doc(after[DEF_REL])
+  assert.equal(d.terms['first-term'].slug, 'elso-fogalom')
+  assert.equal(d.terms['second-term'].slug, 'masodik-fogalom')
+  assert.deepEqual(
+    Object.fromEntries(claims(d.body).map((c) => [c.name, c.slug])),
+    { 'top-level-claim': 'legfelso-allitas', 'nested-claim': 'beagyazott-allitas' },
+  )
+})
+
+test('a slug EDITED in the panel reaches the file', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+
+  const wireBlocks = serializeBlocks(obj.body)
+  const wireClaim = wireBlocks.find((b) => b.blockType === 'claim')
+  assert.equal(wireClaim.slug, 'legfelso-allitas', 'the panel is sent the current slug')
+  wireClaim.slug = 'panelbol-atirt'
+
+  const wireTerms = serializeTerms(obj.terms)
+  assert.equal(wireTerms[0].slug, 'elso-fogalom', 'the panel is sent the current term slug')
+  wireTerms.find((t) => t.name === 'first-term').slug = 'panelbol-atirt-fogalom'
+
+  obj.body = updateModelBlocks(wireBlocks, obj, content.idToObject)
+  updateModelTerms(obj, wireTerms, content.idToObject)
+  saveFromModel(id, content)
+
+  const d = readDef(root)
+  assert.equal(claims(d.body).find((c) => c.name === 'top-level-claim').slug, 'panelbol-atirt')
+  assert.equal(d.terms['first-term'].slug, 'panelbol-atirt-fogalom')
+})
+
+test('a claim and a term on one node MAY share a slug', () => {
+  // Deliberate: they sit under distinct `allitasok.` / `fogalmak.` segments, so
+  // the anchors differ. The check must be scoped per kind, not across.
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, DEF_REL)
+  modelClaims(obj.body).find((c) => c.name === 'top-level-claim').slug = 'kozos'
+  obj.terms.find((t) => t.name === 'first-term').slug = 'kozos'
+  saveFromModel(id, content)
+
+  const d = readDef(root)
+  assert.equal(claims(d.body).find((c) => c.name === 'top-level-claim').slug, 'kozos')
+  assert.equal(d.terms['first-term'].slug, 'kozos')
 })
 
 // ---------------------------------------------------------------------------

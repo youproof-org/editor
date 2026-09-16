@@ -398,8 +398,10 @@ details > summary:hover { opacity: 0.8; }
 .refs-table--refs  th:nth-child(4),  .refs-table--refs  td:nth-child(4)
 { min-width: 100px; }
 
+/* Name, slug, display and canonical — one more column since YP-173 added slug. */
 .refs-table--terms th:nth-child(2),  .refs-table--terms td:nth-child(2),
-.refs-table--terms th:nth-child(3),  .refs-table--terms td:nth-child(3)
+.refs-table--terms th:nth-child(3),  .refs-table--terms td:nth-child(3),
+.refs-table--terms th:nth-child(4),  .refs-table--terms td:nth-child(4)
 { min-width: 100px; }
 
 .refs-table thead { position: sticky; top: 0; background: var(--vscode-editor-background); z-index: 1; }
@@ -447,6 +449,14 @@ details > summary:hover { opacity: 0.8; }
 .ref-input:hover  { border-color: var(--vscode-input-border, #454545); }
 .ref-input:focus  { border-color: var(--vscode-focusBorder); background: var(--vscode-input-background); }
 .ref-input--dup   { border-color: var(--vscode-editorError-foreground, #f14c4c) !important; }
+/* A malformed slug is an error: the save is refused. An ABSENT one only warns —
+   the site falls back to the English name, so the page works and the URL is
+   merely in the wrong language. See media/src/shared/slug.ts. */
+.ref-input--invalid { border-color: var(--vscode-editorError-foreground, #f14c4c) !important; }
+.ref-input--warn    { border-color: var(--vscode-editorWarning-foreground, #cca700) !important; }
+.field-input--invalid { border-color: var(--vscode-editorError-foreground, #f14c4c) !important; }
+.field-input--warn    { border-color: var(--vscode-editorWarning-foreground, #cca700) !important; }
+.field-hint { color: var(--vscode-descriptionForeground); font-size: 10px; padding: 2px 0 0 2px; }
 
 .ref-target-cell  { display: flex; align-items: center; gap: 5px; padding: 2px 6px; white-space: nowrap; }
 .target-selector  { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
