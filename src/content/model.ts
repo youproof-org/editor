@@ -154,9 +154,26 @@ export interface Chapter {
   abstract: ContentBlock[];
   prerequisiteWarning: ContentBlock[];
   prologue: ContentBlock[];
+  /** Every page's sections, in reading order. */
   sections: Section[];
+  pages: ChapterPage[];
   epilogue: ContentBlock[];
   part: Part;
+}
+
+// Read-only: the editor has no UI for page layout or page meta, so a save writes
+// the file's own `pages` back untouched rather than rebuilding it from here.
+export interface ChapterPage {
+  /** 1-based, as in the page's URL and its open-graph title suffix. */
+  index: number;
+  meta?: PageMeta;
+  sections: Section[];
+}
+
+export interface PageMeta {
+  title?: string;
+  description?: string;
+  openGraph?: { title?: string; description?: string };
 }
 
 export interface Section {

@@ -3,7 +3,7 @@ import * as path from 'path';
 import yaml from 'js-yaml';
 import type {
   LoadedContent,
-  Book, Part, Chapter, Section,
+  Book, Part, Chapter, ChapterPage, PageMeta, Section,
   Namespace, Definition, Theorem, Proof, Remark,
   Term, Reference, RefTarget, RefTargetType, RefParent,
   ContentBlock, BlockParent,
@@ -150,6 +150,25 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const obj = raw as Record<string, unknown>;
     return { src: str(obj, 'src', ''), alt: str(obj, 'alt', '') };
+  }
+
+  function asRecord(raw: unknown): Record<string, unknown> | undefined {
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined;
+  }
+
+  function optStr(obj: Record<string, unknown>, key: string): string | undefined {
+    const v = obj[key]; return typeof v === 'string' ? v : undefined;
+  }
+
+  function parsePageMeta(raw: unknown): PageMeta | undefined {
+    const obj = asRecord(raw);
+    if (!obj) return undefined;
+    const og = asRecord(obj['open-graph']);
+    return {
+      title: optStr(obj, 'title'),
+      description: optStr(obj, 'description'),
+      openGraph: og ? { title: optStr(og, 'title'), description: optStr(og, 'description') } : undefined,
+    };
   }
 
   // ─── Term / Reference / Block loading ────────────────────────────────────────
@@ -349,7 +368,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
         name: chapterName, title: str(data, 'title', chapterName), locale: localeOf(data),
         thumbnail: parseLogo(data['thumbnail']),
         references: [], abstract: [], prerequisiteWarning: [],
-        prologue: [], sections: [], epilogue: [], part,
+        prologue: [], sections: [], pages: [], epilogue: [], part,
       };
       registerFile(id, chapterYaml); reg(id, chapter); regRef(chapterKey(bookName, partName, chapterName), id);
       chapter.references          = loadRefs(data['references'], chapter);
@@ -359,9 +378,18 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
       chapter.epilogue            = loadBlocks(data['epilogue'], chapter);
       const chText = collectBlockText([...chapter.abstract, ...chapter.prerequisiteWarning, ...chapter.prologue, ...chapter.epilogue]);
       chapter.references = sortByFirstOccurrence(chapter.references, chText, 'ref');
-      chapter.sections = strArr(data, 'sections')
-        .map(s => loadSection(chapterDir, s, chapterName, partName, bookName, chapter))
-        .filter((s): s is Section => s !== null);
+      const rawPages = Array.isArray(data['pages']) ? data['pages'] : [];
+      chapter.pages = rawPages.map((rawPage, i): ChapterPage => {
+        const page = asRecord(rawPage) ?? {};
+        return {
+          index: i + 1,
+          meta: parsePageMeta(page['meta']),
+          sections: strArr(page, 'sections')
+            .map(s => loadSection(chapterDir, s, chapterName, partName, bookName, chapter))
+            .filter((s): s is Section => s !== null),
+        };
+      });
+      chapter.sections = chapter.pages.flatMap(p => p.sections);
       return chapter;
     } catch { return null; }
   }

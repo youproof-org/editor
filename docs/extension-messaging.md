@@ -52,7 +52,8 @@ Webviews call `client.request<T>(method, params?)` which returns a `Promise<T>` 
 
 ```typescript
 interface ContentTreeData {
-  books:      ContentTreeItem[];   // book → part → chapter → section hierarchy
+  books:      ContentTreeItem[];   // book → part → chapter → section hierarchy; a chapter with
+                                   // more than one page groups its sections under 'Page 1', 'Page 2', …
   kb:         ContentTreeItem[];   // namespace tree with definitions / theorems / proofs / remarks
   selectedId: string | null;       // currently selected object ID, from extension host state
 }

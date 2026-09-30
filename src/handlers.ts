@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
-import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
+import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark, Section } from './content/model';
 import { buildFqn, isExternalTarget, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
 import { normalizeStrings } from './content/normalize';
 import { LOCALES } from './content/locales';
@@ -718,13 +718,14 @@ export function saveFromModel(id: string, content: LoadedContent): void {
 
 // Key order per type — keeps saved YAML stable instead of appending keys. The
 // localization fields (`slug`, `locale`), the chapter migration/listing fields
-// (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
-// (`meta`) are included so they stay in place on save (read from / written back
-// verbatim, not modelled). `slug` follows `name` and `locale` follows `slug`, on
-// every type that carries one — a proof and a remark carry none, since each is
-// addressed by its position in the list of the node that owns it rather than by
-// an identifier of its own. Keys not listed are still preserved —
-// appended after these — but list everything the content emits so nothing moves.
+// (`excerpt`, `published-at`, `legacy-path`) and the chapter's `pages` (each with
+// its crawler-metadata `meta` block) are included so they stay in place on save
+// (written back verbatim from the file, not from the model). `slug` follows `name`
+// and `locale` follows `slug`, on every type that carries one — a proof and a
+// remark carry none, since each is addressed by its position in the list of the
+// node that owns it rather than by an identifier of its own. Keys not listed are
+// still preserved — appended after these — but list everything the content emits
+// so nothing moves.
 // Types with NO entry here (book, article, newsletter, page, landing) are left
 // untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
 // position; add an entry when the editor gains a UI for those types.
@@ -736,19 +737,32 @@ const CANONICAL_ORDER: Record<string, string[]> = {
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
   part:       ['type', 'name', 'slug', 'locale', 'title', 'chapters'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
-               'meta', 'thumbnail', 'references',
-               'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
+               'thumbnail', 'references',
+               'abstract', 'prerequisite-warning', 'prologue', 'pages', 'epilogue'],
 };
+
+const CHAPTER_PAGE_ORDER = ['meta', 'sections'];
 
 function reorderYamlKeys(yamlDoc: Record<string, unknown>, type: string): Record<string, unknown> {
   const order = CANONICAL_ORDER[type];
   if (!order) return yamlDoc;
+  const result = orderKeys(yamlDoc, order);
+  if (type === 'chapter' && Array.isArray(result['pages'])) {
+    result['pages'] = result['pages'].map(page =>
+      page && typeof page === 'object' && !Array.isArray(page)
+        ? orderKeys(page as Record<string, unknown>, CHAPTER_PAGE_ORDER)
+        : page);
+  }
+  return result;
+}
+
+function orderKeys(obj: Record<string, unknown>, order: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const key of order) {
-    if (key in yamlDoc) result[key] = yamlDoc[key];
+    if (key in obj) result[key] = obj[key];
   }
-  for (const key of Object.keys(yamlDoc)) {
-    if (!(key in result)) result[key] = yamlDoc[key];
+  for (const key of Object.keys(obj)) {
+    if (!(key in result)) result[key] = obj[key];
   }
   return result;
 }
@@ -1240,6 +1254,14 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     return { id: ns.id, type: 'namespace', label: ns.title, isFileBacked: ns.filePath !== null, children };
   }
 
+  function sectionToTree(section: Section): ContentTreeItem {
+    const secRefs = section.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
+    return {
+      id: section.id, type: 'section', label: section.title, isFileBacked: section.filePath !== null,
+      children: refItems(secRefs),
+    };
+  }
+
   const books: ContentTreeItem[] = content.books.map(book => ({
     id: book.id, type: 'book', label: book.title, isFileBacked: book.filePath !== null,
     children: book.parts.map(part => ({
@@ -1248,13 +1270,9 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
         const chRefs = chapter.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
         const chChildren: ContentTreeItem[] = [
           ...(chRefs.length ? [group(`${chapter.id}:_refs`, 'References', refItems(chRefs))] : []),
-          ...chapter.sections.map(section => {
-            const secRefs = section.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
-            return {
-              id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
-              children: refItems(secRefs),
-            };
-          }),
+          ...(chapter.pages.length > 1
+            ? chapter.pages.map(page => group(`${chapter.id}:_page${page.index}`, `Page ${page.index}`, page.sections.map(sectionToTree)))
+            : chapter.sections.map(sectionToTree)),
         ];
         return { id: chapter.id, type: 'chapter', label: chapter.title, isFileBacked: chapter.filePath !== null, children: chChildren };
       }),

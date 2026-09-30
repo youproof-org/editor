@@ -32,7 +32,7 @@ Module._load = function (request, ...rest) {
 }
 
 const {
-  saveFromModel,
+  saveFromModel, buildContentTree,
   serializeRefs, updateModelRefs,
   serializeTerms, updateModelTerms,
   serializeBlocks, updateModelBlocks,
@@ -93,13 +93,51 @@ references:
   a-mail:
     display: "Mail"
     target: mailto:hello@youproof.org
+  a-later-section:
+    display: "[szakasz]"
+    target: books.konyv.chapters.fejezet.sections.harmadik-szakasz
 prologue:
   - type: narrative
     content: >-
       Lásd [a-definition], [a-claim], [a-proof], [a-remark], [a-remark-term],
-      [a-page], [a-book], [a-url], [a-mail].
-sections: []
+      [a-page], [a-book], [a-url], [a-mail], [a-later-section].
+pages:
+  - meta:
+      title: Fejezet, első rész
+      description: Az első két szakasz.
+      open-graph:
+        title: 'Fejezet: első rész'
+        description: Próba könyv
+    sections:
+      - elso-szakasz
+      - masodik-szakasz
+  - meta:
+      title: Fejezet, második rész
+      description: A harmadik szakasz.
+      open-graph:
+        title: 'Fejezet (2. rész)'
+        description: Próba könyv
+    sections:
+      - harmadik-szakasz
+epilogue:
+  - type: narrative
+    content: Vége.
 `)
+  for (const [file, name, title] of [
+    ['01-elso-szakasz.yaml', 'elso-szakasz', 'Első szakasz'],
+    ['02-masodik-szakasz.yaml', 'masodik-szakasz', 'Második szakasz'],
+    ['03-harmadik-szakasz.yaml', 'harmadik-szakasz', 'Harmadik szakasz'],
+  ]) {
+    writeFileSync(path.join(books, file), `type: section
+name: ${name}
+slug: ${name}
+locale: hu
+title: ${title}
+body:
+  - type: narrative
+    content: ${title} szövege.
+`)
+  }
 
   // definition: entity slug + two term slugs + two claim slugs, one claim nested
   // inside a subsection (claims are collected recursively).
@@ -543,7 +581,7 @@ references:
       namespace: /proba
       name: proba-definicio
 prologue: []
-sections: []
+pages: []
 `)
   const content = loadContent(root, 'hu')
   const id = content.filePathToId.get(legacy)
@@ -571,4 +609,101 @@ test('saving through the panel writes the same paths as saving from the model', 
   const direct = chapterDoc(saveAll(fixture())).references
   const panel  = chapterDoc(saveAllThroughPanel(fixture())).references
   assert.deepEqual(panel, direct)
+})
+
+// ---------------------------------------------------------------------------
+// Chapter pages
+//
+// A chapter lists its sections under `pages`, each page with its own `meta`. The
+// editor reads the layout but has no UI for it, so a save must write `pages` back
+// exactly as authored.
+// ---------------------------------------------------------------------------
+
+const CHAPTER_REL = path.join('books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
+
+test('the loader reads each page, its meta, and its sections', () => {
+  const { obj: chapter } = nodeFor(fixture(), CHAPTER_REL)
+  assert.deepEqual(chapter.pages.map((p) => p.index), [1, 2])
+  assert.deepEqual(chapter.pages.map((p) => p.sections.map((s) => s.name)),
+    [['elso-szakasz', 'masodik-szakasz'], ['harmadik-szakasz']])
+  assert.deepEqual(chapter.pages[1].meta, {
+    title: 'Fejezet, második rész',
+    description: 'A harmadik szakasz.',
+    openGraph: { title: 'Fejezet (2. rész)', description: 'Próba könyv' },
+  })
+  assert.deepEqual(chapter.sections.map((s) => s.name),
+    ['elso-szakasz', 'masodik-szakasz', 'harmadik-szakasz'], 'the flat list keeps reading order')
+  assert.equal(chapter.pages[1].sections[0], chapter.sections[2], 'a page holds the same section objects')
+})
+
+test('a section on a later page still resolves as a reference target', () => {
+  const refs = chapterDoc(saveAll(fixture())).references
+  assert.equal(refs['a-later-section'].target, 'books.konyv.chapters.fejezet.sections.harmadik-szakasz')
+})
+
+test('a chapter save writes pages back unchanged, between prologue and epilogue', () => {
+  const root = fixture()
+  const before = doc(readFileSync(path.join(root, CHAPTER_REL), 'utf8'))
+  for (const save of [saveAll, saveAllThroughPanel]) {
+    const after = chapterDoc(save(root))
+    assert.deepEqual(after.pages, before.pages, save.name)
+    const keys = Object.keys(after)
+    assert.deepEqual(keys.slice(keys.indexOf('prologue'), keys.indexOf('prologue') + 3),
+      ['prologue', 'pages', 'epilogue'], save.name)
+    assert.ok(!('sections' in after) && !('meta' in after), 'no chapter-level sections or meta appear')
+  }
+})
+
+test('a page is saved with meta before sections', () => {
+  const root = fixture()
+  const fp = path.join(root, CHAPTER_REL)
+  writeFileSync(fp, readFileSync(fp, 'utf8').replace(`  - meta:
+      title: Fejezet, második rész
+      description: A harmadik szakasz.
+      open-graph:
+        title: 'Fejezet (2. rész)'
+        description: Próba könyv
+    sections:
+      - harmadik-szakasz
+`, `  - sections:
+      - harmadik-szakasz
+    meta:
+      title: Fejezet, második rész
+      description: A harmadik szakasz.
+      open-graph:
+        title: 'Fejezet (2. rész)'
+        description: Próba könyv
+`))
+  assert.deepEqual(Object.keys(doc(readFileSync(fp, 'utf8')).pages[1]), ['sections', 'meta'], 'the fixture starts out of order')
+  const pages = chapterDoc(saveAll(root)).pages
+  assert.deepEqual(pages.map((p) => Object.keys(p)), [['meta', 'sections'], ['meta', 'sections']])
+  assert.deepEqual(Object.keys(pages[1].meta), ['title', 'description', 'open-graph'])
+})
+
+const chapterTreeItem = (root) =>
+  buildContentTree(loadContent(root, 'hu')).books[0].children[0].children[0]
+
+test('the tree groups sections by page when a chapter has more than one', () => {
+  const pages = chapterTreeItem(fixture()).children.filter((c) => c.type === 'group' && c.label.startsWith('Page'))
+  assert.deepEqual(pages.map((p) => p.label), ['Page 1', 'Page 2'])
+  assert.deepEqual(pages.map((p) => p.children.map((s) => s.label)),
+    [['Első szakasz', 'Második szakasz'], ['Harmadik szakasz']])
+})
+
+test('the tree lists a single-page chapter\'s sections directly under the chapter', () => {
+  const root = fixture()
+  const fp = path.join(root, CHAPTER_REL)
+  writeFileSync(fp, readFileSync(fp, 'utf8').replace(/pages:[\s\S]*?(?=epilogue:)/, `pages:
+  - meta:
+      title: Fejezet
+      description: Minden szakasz.
+    sections:
+      - elso-szakasz
+      - masodik-szakasz
+      - harmadik-szakasz
+`))
+  const children = chapterTreeItem(root).children
+  assert.deepEqual(children.filter((c) => c.type === 'section').map((s) => s.label),
+    ['Első szakasz', 'Második szakasz', 'Harmadik szakasz'])
+  assert.ok(!children.some((c) => c.type === 'group' && c.label.startsWith('Page')))
 })
