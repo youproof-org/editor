@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { MessageServer } from '../protocol/messageServer';
+import { mediaRoot } from './mediaRoot';
 
 const SCHEME   = 'youproof';
 const VIEWTYPE = 'youproof.nodeEditor';
@@ -68,7 +69,7 @@ export class PanelManager implements vscode.CustomReadonlyEditorProvider<vscode.
 
     webviewPanel.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this._context.extensionUri],
+      localResourceRoots: [mediaRoot(this._context)],
     };
 
     const type = this._types.get(nodeId) ?? '';
@@ -165,10 +166,10 @@ export class PanelManager implements vscode.CustomReadonlyEditorProvider<vscode.
 
   private _buildHtml(webview: vscode.Webview, nodeId: string): string {
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._context.extensionUri, 'media', 'editor.js'),
+      vscode.Uri.joinPath(mediaRoot(this._context), 'editor.js'),
     );
     const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._context.extensionUri, 'media', 'editor.css'),
+      vscode.Uri.joinPath(mediaRoot(this._context), 'editor.css'),
     );
     const csp = webview.cspSource;
 

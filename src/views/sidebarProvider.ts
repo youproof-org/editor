@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { MessageServer } from '../protocol/messageServer';
+import { mediaRoot } from './mediaRoot';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewId = 'youproofSidebar';
@@ -14,7 +15,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this._context.extensionUri],
+      localResourceRoots: [mediaRoot(this._context)],
     };
 
     webviewView.webview.html = this._buildHtml(webviewView.webview);
@@ -29,10 +30,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   private _buildHtml(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._context.extensionUri, 'media', 'panel.js'),
+      vscode.Uri.joinPath(mediaRoot(this._context), 'panel.js'),
     );
     const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this._context.extensionUri, 'media', 'panel.css'),
+      vscode.Uri.joinPath(mediaRoot(this._context), 'panel.css'),
     );
     const csp = webview.cspSource;
 
