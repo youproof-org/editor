@@ -844,9 +844,9 @@ function blockToYaml(
   content: LoadedContent,
 ): WireBlock {
   const bt = wire['blockType'] as string;
-  if (bt === 'embed' || bt === 'recall') {
+  if (bt === 'embed') {
     const r = blockHeader(wire, bt);
-    if (bt === 'embed' && wire['showTitle']) r['show-title'] = wire['showTitle'];
+    if (wire['showTitle']) r['show-title'] = wire['showTitle'];
     const target = wire['target'] as { type: string; target: string } | undefined;
     if (target) {
       const yt = targetToYaml(target, content);
@@ -1033,14 +1033,12 @@ function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock):
   model['parent']    = parent;
 
   const bt = wire['blockType'] as string;
-  if (bt === 'embed' || bt === 'recall') {
+  if (bt === 'embed') {
     if ('targetType' in wire || 'targetId' in wire) {
       model['target'] = { type: String(wire['targetType'] ?? ''), target: String(wire['targetId'] ?? '') };
     }
-    if (bt === 'embed') {
-      if ('showTitle' in wire) model['showTitle'] = wire['showTitle'];
-      else delete model['showTitle'];
-    }
+    if ('showTitle' in wire) model['showTitle'] = wire['showTitle'];
+    else delete model['showTitle'];
     return;
   }
   // Mirrors serializeBlock's list — see the note there. A field absent from `wire`
@@ -1155,7 +1153,7 @@ function buildTargetObjects(rawRefs: unknown[], blocks: unknown[], content: Load
   const walk = (bs: unknown[]): void => {
     for (const b of bs as Array<Record<string, unknown>>) {
       const bt = b['blockType'] as string | undefined;
-      if (bt === 'embed' || bt === 'recall') {
+      if (bt === 'embed') {
         addTarget(b['target'] as { type: string; target: string } | undefined);
       }
       if (Array.isArray(b['blocks'])) walk(b['blocks'] as unknown[]);

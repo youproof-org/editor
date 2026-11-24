@@ -96,13 +96,12 @@ export interface ContentFigureBlock        extends ContentBlockBase { blockType:
 export interface ContentSubsectionBlock    extends ContentBlockBase { blockType: 'subsection';      title: string; blocks: ContentBlock[]; }
 export interface ContentDetailsBlock       extends ContentBlockBase { blockType: 'details';         title?: string; blocks: ContentBlock[]; }
 export interface ContentEmbedBlock         extends ContentBlockBase { blockType: 'embed';           targetId: string; targetType: string; showTitle?: boolean; }
-export interface ContentRecallBlock        extends ContentBlockBase { blockType: 'recall';          targetId: string; targetType: string; }
 
 export type ContentBlock =
   | ContentNarrativeBlock | ContentFormulaBlock | ContentClaimBlock
   | ContentOrderedListBlock | ContentUnorderedListBlock | ContentTypewriterBlock
   | ContentQuoteBlock | ContentFigureBlock | ContentSubsectionBlock | ContentDetailsBlock
-  | ContentEmbedBlock | ContentRecallBlock;
+  | ContentEmbedBlock;
 
 // ─── Term / reference types ───────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ import type {
   Namespace, Definition, Theorem, Proof, Remark,
   Term, Reference, RefTarget, RefTargetType, RefParent,
   ContentBlock, BlockParent,
-  SubsectionBlock, DetailsBlock, EmbedBlock, RecallBlock,
+  SubsectionBlock, DetailsBlock, EmbedBlock,
   Labels, LabelCase,
 } from './model';
 import { isExternalTarget, parseFqn, type FqnKind } from './fqn';
@@ -270,11 +270,6 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
           };
           enqueueTarget(b['target'], r => { emb.target = r; });
           block = emb; break;
-        }
-        case 'recall': {
-          const rec: RecallBlock = { id, blockType: 'recall', target: { type: 'external', target: '' }, context, parent };
-          enqueueTarget(b['target'], r => { rec.target = r; });
-          block = rec; break;
         }
         case 'claim':
           block = { id, blockType: 'claim', name: str(b, 'name', id), slug: str(b, 'slug', ''), content: str(b, 'content', ''), formula: b['formula'] as string | undefined, context, parent }; break;

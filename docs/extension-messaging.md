@@ -160,7 +160,7 @@ interface ContentTargetObject {
 }
 ```
 
-`ContentBlock` is a discriminated union of 12 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`, `recall`.
+`ContentBlock` is a discriminated union of 11 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`.
 
 A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a term, `name` is the English id a reference resolves against and `slug` is the localized anchor segment, `''` when the file has none — legal content, since the site falls back to `name`. A save is refused if a non-empty slug is not lowercase kebab-case, or if two claims (or two terms) on one node resolve to the same anchor.
 
@@ -206,7 +206,7 @@ interface SaveChapterParams {
 
 The extension host:
 1. Looks up the YAML file path from `content.idToFilePath.get(id)`.
-2. Reads the existing YAML from disk and merges the wire blocks back using `blockToYaml` / `mergeBlocks` (which preserves `embed` and `recall` blocks verbatim from the original YAML, since their target references are runtime-generated IDs that cannot be reconstructed from the wire format).
+2. Reads the existing YAML from disk and merges the wire blocks back using `blockToYaml` / `mergeBlocks` (which preserves `embed` blocks verbatim from the original YAML, since their target references are runtime-generated IDs that cannot be reconstructed from the wire format).
 3. Writes the updated YAML back to disk with `lineWidth: 120`.
 4. Updates the in-memory model in-place: `updateModelBlocks` patches editable block fields; `updateModelTerms` and `updateModelRefs` add, update, and remove term/reference entries in the cached model and keep `idToObject` consistent.
 5. Calls `PanelManager.setDirty(id, false)` (internal method) which removes the `●` prefix from the tab title.

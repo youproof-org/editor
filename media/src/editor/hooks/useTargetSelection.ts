@@ -38,7 +38,7 @@ export function useTargetSelection({ draftRef, setDraft, setTargetObjects, markD
 
   const handleBlockTargetChange = useCallback((blockId: string, target: ContentTargetObject | null) => {
     const updateBlock = (b: ContentBlock): ContentBlock => {
-      if (b.id === blockId && (b.blockType === 'embed' || b.blockType === 'recall')) {
+      if (b.id === blockId && b.blockType === 'embed') {
         return { ...b, targetType: target?.type ?? '', targetId: target?.id ?? '' };
       }
       if (b.blockType === 'subsection' || b.blockType === 'details') {

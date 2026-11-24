@@ -99,14 +99,13 @@ export interface QuoteBlock        extends BlockBase { blockType: 'quote';      
 export interface SubsectionBlock   extends BlockBase { blockType: 'subsection';     title: string; blocks: ContentBlock[]; }
 export interface DetailsBlock      extends BlockBase { blockType: 'details';        title?: string; blocks: ContentBlock[]; }
 export interface EmbedBlock        extends BlockBase { blockType: 'embed';          target: RefTarget; showTitle?: boolean; }
-export interface RecallBlock       extends BlockBase { blockType: 'recall';         target: RefTarget; }
 export interface ClaimBlock        extends BlockBase { blockType: 'claim';          name: string; slug: string; content: string; formula?: string; }
 
 export type ContentBlock =
   | NarrativeBlock | FormulaBlock | FigureBlock
   | OrderedListBlock | UnorderedListBlock | TypewriterBlock | QuoteBlock
   | SubsectionBlock | DetailsBlock
-  | EmbedBlock | RecallBlock | ClaimBlock;
+  | EmbedBlock | ClaimBlock;
 
 // ─── Book hierarchy ───────────────────────────────────────────────────────────
 
