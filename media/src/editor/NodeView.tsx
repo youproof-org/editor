@@ -50,7 +50,13 @@ export default function NodeView({ nodeId }: Props) {
     <BlockOpsProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
       <div className="node-view">
         <div className="node-view-content">
-          <EntityHeader nodeId={nodeId} type={draft.type} title={draft.title ?? draft.name} isDirty={isDirty} />
+          <EntityHeader
+            nodeId={nodeId} type={draft.type} title={draft.title ?? draft.name} isDirty={isDirty}
+            entityLabel={draft.type === 'chapter' || draft.type === 'section' ? undefined : {
+              locale: draft.locale, type: draft.type, label: draft.label, hasLabelsBlock: draft.hasLabelsBlock ?? false,
+              labelVariants: draft.labelVariants, labelRegistryError: draft.labelRegistryError,
+            }}
+          />
           <div className="blocks">
             <EntityBody draft={draft} setDraft={setDraft} markDirty={markDirty} />
           </div>

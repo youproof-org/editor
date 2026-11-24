@@ -40,15 +40,12 @@ export interface RefSuggestion {
 export interface GetReferenceSuggestionsRequest  { currentObjectId: string; }
 export interface GetReferenceSuggestionsResponse { suggestions: RefSuggestion[]; }
 
-export interface ContentLabelCase { base?: string; suffix?: string; }
-export interface ContentLabels     { canonical: string; cases?: Record<string, ContentLabelCase>; }
-
 interface SaveObjectBase { id: string; }
 
-export interface SaveDefinitionObjectRequest extends SaveObjectBase { entityType: 'definition'; body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; labels?: ContentLabels; }
-export interface SaveTheoremObjectRequest    extends SaveObjectBase { entityType: 'theorem';    body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; labels?: ContentLabels; }
-export interface SaveProofObjectRequest      extends SaveObjectBase { entityType: 'proof';      body: ContentBlock[]; references: ContentReference[]; }
-export interface SaveRemarkObjectRequest     extends SaveObjectBase { entityType: 'remark';     body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; }
+export interface SaveDefinitionObjectRequest extends SaveObjectBase { entityType: 'definition'; body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; label?: string; }
+export interface SaveTheoremObjectRequest    extends SaveObjectBase { entityType: 'theorem';    body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; label?: string; }
+export interface SaveProofObjectRequest      extends SaveObjectBase { entityType: 'proof';      body: ContentBlock[]; references: ContentReference[]; label?: string; }
+export interface SaveRemarkObjectRequest     extends SaveObjectBase { entityType: 'remark';     body: ContentBlock[]; terms: ContentTerm[]; references: ContentReference[]; label?: string; }
 export interface SaveSectionObjectRequest    extends SaveObjectBase { entityType: 'section';    body: ContentBlock[]; references: ContentReference[]; }
 export interface SaveChapterObjectRequest    extends SaveObjectBase {
   entityType: 'chapter';
@@ -111,20 +108,28 @@ export interface ContentReference { id: string; name: string; display: string; t
 // ─── Content object data (discriminated by type) ──────────────────────────────
 
 interface ContentObjectBase { id: string; name: string; title?: string; selectedId: string | null; }
+export type KbEntityType = 'definition' | 'theorem' | 'proof' | 'remark';
+export interface EntityLabelVariant { key: string; canonical: string; }
+export interface EntityTypeLabels   { default: string; variants: EntityLabelVariant[]; }
 
-export interface ContentDefinitionData extends ContentObjectBase {
+interface ContentEntityLabelFields {
+  locale: string; label?: string; hasLabelsBlock?: boolean;
+  labelVariants?: EntityTypeLabels; labelRegistryError?: string;
+}
+
+export interface ContentDefinitionData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'definition'; namespacePath: string;
-  terms: ContentTerm[]; references: ContentReference[]; body: ContentBlock[]; labels?: ContentLabels;
+  terms: ContentTerm[]; references: ContentReference[]; body: ContentBlock[];
 }
-export interface ContentTheoremData extends ContentObjectBase {
+export interface ContentTheoremData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'theorem'; namespacePath: string;
-  terms: ContentTerm[]; references: ContentReference[]; body: ContentBlock[]; labels?: ContentLabels;
+  terms: ContentTerm[]; references: ContentReference[]; body: ContentBlock[];
 }
-export interface ContentProofData extends ContentObjectBase {
+export interface ContentProofData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'proof'; namespacePath: string;
   references: ContentReference[]; body: ContentBlock[];
 }
-export interface ContentRemarkData extends ContentObjectBase {
+export interface ContentRemarkData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'remark'; namespacePath: string;
   terms: ContentTerm[]; references: ContentReference[]; body: ContentBlock[];
 }

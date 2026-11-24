@@ -1,7 +1,6 @@
 import BottomPane from './BottomPane';
 import RefsPanel from './RefsPanel';
 import TermsPanel from './TermsPanel';
-import LabelsEditor from './LabelsEditor';
 import { useActiveTab } from './hooks/useActiveTab';
 import { useSelectionContext } from './contexts/SelectionContext';
 import { useBracketEditingContext } from './contexts/BracketEditingContext';
@@ -28,7 +27,7 @@ export default function EditorTabs({ draft, sortedRefs, sortedTerms, terms, onSe
   const { activeItem, insertAtFocused } = useBracketEditingContext();
   const { targetObjects, selectingSelectorId, onBeginSelectTarget, onEndSelectTarget, onRefTargetChange, onOpenTarget } =
     useTargetSelectionContext();
-  const { onRefChange, onTermChange, onLabelsChange } = useRefTermEditingContext();
+  const { onRefChange, onTermChange } = useRefTermEditingContext();
   const { activeTabId, setActiveTabId } = useActiveTab(draft, selectedId, activeItem);
 
   const selectedTermName = (!activeItem && 'terms' in draft && selectedId)
@@ -69,11 +68,6 @@ export default function EditorTabs({ draft, sortedRefs, sortedTerms, terms, onSe
           onSelect={onSelect}
         />,
       },
-      ...((draft.type === 'definition' || draft.type === 'theorem') ? [{
-        id: 'labels',
-        label: 'Labels',
-        panel: <LabelsEditor labels={draft.labels} onChange={onLabelsChange} />,
-      }] : []),
     ]} />
   );
 }

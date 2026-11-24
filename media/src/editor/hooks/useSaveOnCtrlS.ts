@@ -30,12 +30,12 @@ export function useSaveOnCtrlS({ nodeId, draft, isDirtyRef, setIsDirty, setError
         prologue: d.prologue, epilogue: d.epilogue,
         references: refsToSave } as SaveChapterObjectRequest;
     } else {
-      const labelsToSave = (d.type === 'definition' || d.type === 'theorem') ? d.labels : undefined;
+      const labelToSave = d.type === 'section' ? undefined : d.label;
       params = {
         id: nodeId, entityType: d.type, body: d.body,
         references: refsToSave,
         ...(termsToSave ? { terms: termsToSave } : {}),
-        ...(labelsToSave ? { labels: labelsToSave } : {}),
+        ...(labelToSave ? { label: labelToSave } : {}),
       } as SaveContentObjectRequest;
     }
 

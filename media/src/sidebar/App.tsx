@@ -165,6 +165,9 @@ export default function App() {
     return (
       <div id="app">
         <p className="msg error">{error}</p>
+        <div className="sidebar-footer">
+          <button className="reload-model-btn" onClick={() => handleReloadModel()}>Retry</button>
+        </div>
       </div>
     );
   }

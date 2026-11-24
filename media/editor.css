@@ -82,6 +82,11 @@ body {
   white-space: nowrap;
 }
 
+.entity-label-picker {
+  width: auto;
+  flex-shrink: 0;
+}
+
 .entity-dirty {
   font-size: 16px;
   color: var(--vscode-descriptionForeground);
