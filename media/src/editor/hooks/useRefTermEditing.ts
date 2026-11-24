@@ -1,6 +1,6 @@
 import { Dispatch, SetStateAction, useCallback, useRef } from 'react';
 import type { RenameEvent } from '../contexts/BracketEditingContext';
-import type { ContentLabels, ContentObjectData, ContentTargetObject, ContentTerm, RefSuggestion } from '../../shared/types';
+import type { ContentObjectData, ContentTargetObject, ContentTerm, RefSuggestion } from '../../shared/types';
 
 interface Params {
   setDraft:         Dispatch<SetStateAction<ContentObjectData | null>>;
@@ -38,11 +38,11 @@ export function useRefTermEditing({ setDraft, setTargetObjects, draftRef, markDi
     markDirty();
   }, [markDirty]);
 
-  const handleLabelsChange = useCallback((labels: ContentLabels | undefined) => {
+  const handleLabelChange = useCallback((label: string | undefined) => {
     setDraft(prev => {
-      if (!prev) return prev;
-      if (prev.type !== 'definition' && prev.type !== 'theorem') return prev;
-      return { ...prev, labels };
+      if (!prev || prev.type === 'chapter' || prev.type === 'section') return prev;
+      const { label: _previous, ...rest } = prev;
+      return label === undefined ? rest : { ...rest, label };
     });
     markDirty();
   }, [markDirty]);
@@ -70,5 +70,5 @@ export function useRefTermEditing({ setDraft, setTargetObjects, draftRef, markDi
     markDirty();
   }, [markDirty]);
 
-  return { handleRefChange, handleTermChange, handleLabelsChange, subscribeToRename, ensureRefFromSuggestion };
+  return { handleRefChange, handleTermChange, handleLabelChange, subscribeToRename, ensureRefFromSuggestion };
 }

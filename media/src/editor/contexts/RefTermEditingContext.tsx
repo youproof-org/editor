@@ -1,11 +1,11 @@
 import { createContext, useContext } from 'react';
 import type { RenameEvent } from './BracketEditingContext';
-import type { ContentLabels, ContentTerm, RefSuggestion } from '../../shared/types';
+import type { ContentTerm, RefSuggestion } from '../../shared/types';
 
 export interface RefTermEditingContextValue {
   onRefChange:             (id: string, field: 'name' | 'display', value: string) => void;
   onTermChange:            (updated: ContentTerm) => void;
-  onLabelsChange:          (labels: ContentLabels | undefined) => void;
+  onLabelChange:           (label: string | undefined) => void;
   subscribeToRename:       (handler: (event: RenameEvent) => void) => () => void;
   ensureRefFromSuggestion: (s: RefSuggestion) => void;
 }

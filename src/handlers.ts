@@ -7,13 +7,14 @@ import type { PanelManager } from './views/panelManager';
 import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
 import { buildFqn, isExternalTarget, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
 import { normalizeStrings } from './content/normalize';
-import { LOCALES } from './content/locales';
+import { getLocales } from './content/locales';
+import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
 import type {
   ContentTreeItem,
   ContentTargetObject,
-  ContentLabels,
   ContentTerm,
   ContentReference,
+  KbEntityType,
   GetContentObjectRequest,
   SelectContentObjectRequest,
   SaveContentObjectRequest,
@@ -43,6 +44,8 @@ export interface HandlerContext {
   panelManager:      PanelManager;
   context:           vscode.ExtensionContext;
   getContent:        () => LoadedContent;
+  getServices:       () => ServicesData;
+  reloadServices:    () => ServicesData;
   getSelectedId:     () => string | null;
   setSelectedId:     (id: string | null) => void;
   resetContentCache: () => void;
@@ -53,15 +56,15 @@ export interface HandlerContext {
 // ─── Handler registration ─────────────────────────────────────────────────────
 
 export function registerHandlers(ctx: HandlerContext): void {
-  const { server, panelManager, getContent, getSelectedId, setSelectedId, resetContentCache,
-          getActiveLocale, setActiveLocale } = ctx;
+  const { server, panelManager, getContent, getServices, reloadServices, getSelectedId, setSelectedId,
+          resetContentCache, getActiveLocale, setActiveLocale } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
     return {
       ...buildContentTree(getContent()),
       selectedId: getSelectedId(),
-      locales: LOCALES,
+      locales: getLocales(),
       activeLocale: getActiveLocale(),
     };
   });
@@ -89,17 +92,15 @@ export function registerHandlers(ctx: HandlerContext): void {
     const targetObjects = buildTargetObjects(rawRefs, allBlocks, content);
     const selectedId = getSelectedId();
 
-    const labels = (type === 'definition' || type === 'theorem')
-      ? (obj['labels'] as ContentLabels | undefined)
-      : undefined;
+    const labelFields = KB_ENTITY_TYPES.includes(type)
+      ? entityLabelFields(obj, getServices())
+      : {};
 
     let contentObject;
-    if (type === 'definition' || type === 'theorem') {
-      contentObject = { ...base, type, namespacePath: ns, terms, references: refs, body: serializeBlocks(obj['body'] as unknown[]), labels, selectedId };
-    } else if (type === 'remark') {
-      contentObject = { ...base, type, namespacePath: ns, terms, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
+    if (type === 'definition' || type === 'theorem' || type === 'remark') {
+      contentObject = { ...base, ...labelFields, type, namespacePath: ns, terms, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
     } else if (type === 'proof') {
-      contentObject = { ...base, type, namespacePath: ns, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
+      contentObject = { ...base, ...labelFields, type, namespacePath: ns, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
     } else if (type === 'chapter') {
       contentObject = { ...base, type, references: refs,
         abstract:            serializeBlocks(obj['abstract']            as unknown[]),
@@ -186,13 +187,10 @@ export function registerHandlers(ctx: HandlerContext): void {
     if ('references' in p && Array.isArray(p.references))
       updateModelRefs(obj, p.references as ContentReference[], content.idToObject);
 
-    if (p.entityType === 'definition' || p.entityType === 'theorem') {
-      const lp = p as { labels?: ContentLabels };
-      if (lp.labels && lp.labels.canonical) {
-        obj['labels'] = lp.labels;
-      } else {
-        delete obj['labels'];
-      }
+    if (KB_ENTITY_TYPES.includes(p.entityType)) {
+      const { label } = p as { label?: string };
+      if (label) obj['label'] = label;
+      else delete obj['label'];
     }
 
     saveFromModel(p.id, content);
@@ -236,12 +234,12 @@ export function registerHandlers(ctx: HandlerContext): void {
 
   server.onRequest('reloadModel', async (params): Promise<ReloadModelResponse> => {
     const p = (params ?? {}) as ReloadModelRequest;
+    const content = showingServicesErrors(getContent);
     // Switch to the requested locale when valid; otherwise reload the current one.
     // The editor holds exactly one locale at a time, so a locale switch discards
     // and rebuilds the whole model (below).
-    const targetLocale = p.locale && LOCALES.includes(p.locale) ? p.locale : getActiveLocale();
+    let targetLocale = p.locale && getLocales().includes(p.locale) ? p.locale : getActiveLocale();
 
-    const content  = getContent();
     const allIds   = [...content.idToFilePath.keys()];
     const dirtyIds = allIds.filter(id => panelManager.isDirty(id));
     if (dirtyIds.length > 0) {
@@ -256,12 +254,19 @@ export function registerHandlers(ctx: HandlerContext): void {
       return {
         ...buildContentTree(content),
         selectedId: getSelectedId(),
-        locales: LOCALES,
+        locales: getLocales(),
         activeLocale: getActiveLocale(),
       };
     }
 
     const openIds = panelManager.closeAll();
+    try {
+      showingServicesErrors(reloadServices);
+    } catch (err) {
+      resetContentCache();
+      throw err;
+    }
+    if (!getLocales().includes(targetLocale)) targetLocale = getActiveLocale();
     const sel = getSelectedId();
     let oldSelectedFilePath: string | undefined;
     if (sel) {
@@ -300,7 +305,7 @@ export function registerHandlers(ctx: HandlerContext): void {
     return {
       ...buildContentTree(newContent),
       selectedId: newSelectedId,
-      locales: LOCALES,
+      locales: getLocales(),
       activeLocale: getActiveLocale(),
     };
   });
@@ -599,11 +604,35 @@ function findOwner(
 // Types whose `terms` map the model actually represents (see model.ts: `Proof`
 // has no `terms`). Only for these may an empty model mean "the author deleted the
 // terms" — for anything else the field simply isn't modelled, so it must be left
-// exactly as authored rather than deleted. Mirrors how `labels` below is only
-// rewritten for the two types that model it. Defining terms directly on a proof
+// exactly as authored rather than deleted. Mirrors how `label` below is only
+// rewritten for the types that model it. Defining terms directly on a proof
 // is a planned content feature; without this guard the first save would silently
 // destroy such a block.
 const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
+
+const KB_ENTITY_TYPES: string[] = ['definition', 'theorem', 'proof', 'remark'];
+
+function showingServicesErrors<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    if (err instanceof ServicesDataError) vscode.window.showErrorMessage(err.message);
+    throw err;
+  }
+}
+
+// Exported for test/services-data.test.mjs. Not part of the extension's public surface.
+export function entityLabelFields(obj: Record<string, unknown>, services: ServicesData): Record<string, unknown> {
+  const locale = obj['locale'] as string;
+  const labelVariants = services.entityLabels?.[locale]?.[obj['type'] as KbEntityType];
+  return {
+    locale,
+    ...(typeof obj['label'] === 'string' ? { label: obj['label'] } : {}),
+    ...(obj['hasLabelsBlock'] ? { hasLabelsBlock: true } : {}),
+    ...(labelVariants ? { labelVariants } : {}),
+    ...(services.entityLabelsError ? { labelRegistryError: services.entityLabelsError } : {}),
+  };
+}
 
 // Exported for the round-trip test (test/save-roundtrip.test.mjs), which asserts
 // that saving a knowledge-base file preserves the unmodelled `slug` fields and is
@@ -627,6 +656,13 @@ export function saveFromModel(id: string, content: LoadedContent): void {
   // slug the site build would reject must stop the save while the file on disk is
   // still intact, not halfway through being rewritten.
   assertSlugsAreSound(obj, type);
+  if (KB_ENTITY_TYPES.includes(type) && 'labels' in yamlDoc) {
+    throw new Error(
+      `${path.basename(filePath)} still has a 'labels' block, which the site no longer accepts. ` +
+        `Remove it in the YAML file and name the variant with 'label' (or omit 'label' for the ` +
+        `${type} default), then reload the content before saving here again.`,
+    );
+  }
 
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
@@ -691,22 +727,9 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     delete yamlDoc['references'];
   }
 
-  const modelLabels = obj['labels'] as ContentLabels | undefined;
-  if ((type === 'definition' || type === 'theorem') && modelLabels && modelLabels.canonical) {
-    const labelsYaml: Record<string, unknown> = { canonical: modelLabels.canonical };
-    if (modelLabels.cases && Object.keys(modelLabels.cases).length > 0) {
-      const casesYaml: Record<string, unknown> = {};
-      for (const [k, c] of Object.entries(modelLabels.cases)) {
-        const entry: Record<string, unknown> = {};
-        if (c.base)   entry['base']   = c.base;
-        if (c.suffix) entry['suffix'] = c.suffix;
-        casesYaml[k] = entry;
-      }
-      labelsYaml['cases'] = casesYaml;
-    }
-    yamlDoc['labels'] = labelsYaml;
-  } else if (type === 'definition' || type === 'theorem') {
-    delete yamlDoc['labels'];
+  if (KB_ENTITY_TYPES.includes(type)) {
+    if (typeof obj['label'] === 'string' && obj['label']) yamlDoc['label'] = obj['label'];
+    else delete yamlDoc['label'];
   }
 
   const reordered = reorderYamlKeys(yamlDoc, type);
@@ -729,10 +752,10 @@ export function saveFromModel(id: string, content: LoadedContent): void {
 // untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
 // position; add an entry when the editor gains a UI for those types.
 const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'slug', 'locale', 'title', 'labels', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'slug', 'locale', 'title', 'labels', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'locale', 'title', 'remarks', 'terms', 'references', 'body'],
-  remark:     ['type', 'name', 'locale', 'title', 'terms', 'references', 'body'],
+  definition: ['type', 'name', 'slug', 'locale', 'title', 'label', 'remarks', 'terms', 'references', 'body'],
+  theorem:    ['type', 'name', 'slug', 'locale', 'title', 'label', 'proofs', 'remarks', 'terms', 'references', 'body'],
+  proof:      ['type', 'name', 'locale', 'title', 'label', 'remarks', 'terms', 'references', 'body'],
+  remark:     ['type', 'name', 'locale', 'title', 'label', 'terms', 'references', 'body'],
   section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
   part:       ['type', 'name', 'slug', 'locale', 'title', 'chapters'],
   chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
@@ -844,9 +867,9 @@ function blockToYaml(
   content: LoadedContent,
 ): WireBlock {
   const bt = wire['blockType'] as string;
-  if (bt === 'embed' || bt === 'recall') {
+  if (bt === 'embed') {
     const r = blockHeader(wire, bt);
-    if (bt === 'embed' && wire['showTitle']) r['show-title'] = wire['showTitle'];
+    if (wire['showTitle']) r['show-title'] = wire['showTitle'];
     const target = wire['target'] as { type: string; target: string } | undefined;
     if (target) {
       const yt = targetToYaml(target, content);
@@ -1033,14 +1056,12 @@ function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock):
   model['parent']    = parent;
 
   const bt = wire['blockType'] as string;
-  if (bt === 'embed' || bt === 'recall') {
+  if (bt === 'embed') {
     if ('targetType' in wire || 'targetId' in wire) {
       model['target'] = { type: String(wire['targetType'] ?? ''), target: String(wire['targetId'] ?? '') };
     }
-    if (bt === 'embed') {
-      if ('showTitle' in wire) model['showTitle'] = wire['showTitle'];
-      else delete model['showTitle'];
-    }
+    if ('showTitle' in wire) model['showTitle'] = wire['showTitle'];
+    else delete model['showTitle'];
     return;
   }
   // Mirrors serializeBlock's list — see the note there. A field absent from `wire`
@@ -1155,7 +1176,7 @@ function buildTargetObjects(rawRefs: unknown[], blocks: unknown[], content: Load
   const walk = (bs: unknown[]): void => {
     for (const b of bs as Array<Record<string, unknown>>) {
       const bt = b['blockType'] as string | undefined;
-      if (bt === 'embed' || bt === 'recall') {
+      if (bt === 'embed') {
         addTarget(b['target'] as { type: string; target: string } | undefined);
       }
       if (Array.isArray(b['blocks'])) walk(b['blocks'] as unknown[]);
@@ -1275,4 +1296,11 @@ export function resolveContentRoot(context: vscode.ExtensionContext): string {
   const base = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     ?? path.dirname(context.extensionUri.fsPath);
   return path.join(base, configured);
+}
+
+export function resolveServicesRootSetting(context: vscode.ExtensionContext, contentRoot: string): string {
+  const configured = vscode.workspace.getConfiguration('youproof').get<string>('servicesRoot');
+  const base = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+    ?? path.dirname(context.extensionUri.fsPath);
+  return resolveServicesRoot(configured, base, contentRoot);
 }

@@ -12,16 +12,16 @@ interface Props {
 }
 
 export default function RefTermEditingProvider({ setDraft, setTargetObjects, draftRef, markDirty, children }: Props) {
-  const { handleRefChange, handleTermChange, handleLabelsChange, subscribeToRename, ensureRefFromSuggestion } =
+  const { handleRefChange, handleTermChange, handleLabelChange, subscribeToRename, ensureRefFromSuggestion } =
     useRefTermEditing({ setDraft, setTargetObjects, draftRef, markDirty });
 
   const value = useMemo(() => ({
     onRefChange:    handleRefChange,
     onTermChange:   handleTermChange,
-    onLabelsChange: handleLabelsChange,
+    onLabelChange:  handleLabelChange,
     subscribeToRename,
     ensureRefFromSuggestion,
-  }), [handleRefChange, handleTermChange, handleLabelsChange, subscribeToRename, ensureRefFromSuggestion]);
+  }), [handleRefChange, handleTermChange, handleLabelChange, subscribeToRename, ensureRefFromSuggestion]);
 
   return <RefTermEditingContext.Provider value={value}>{children}</RefTermEditingContext.Provider>;
 }

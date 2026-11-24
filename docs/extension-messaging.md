@@ -101,8 +101,22 @@ interface ContentObjectBase {
   selectedId: string | null;   // currently selected object ID, from extension host state
 }
 
+// definition | theorem | proof | remark — carry the entity's label variant
+interface ContentEntityLabelFields {
+  locale:              string;
+  label?:              string;             // a variant key from the label registry; absent = the type's default
+  hasLabelsBlock?:     boolean;            // the file still has a legacy `labels` block; saving it is refused
+  labelVariants?:      EntityTypeLabels;   // this locale's variants for the entity's type, from the registry
+  labelRegistryError?: string;             // set when the registry could not be read; names the path and setting
+}
+
+interface EntityTypeLabels {
+  default:  string;
+  variants: { key: string; canonical: string }[];   // in registry order
+}
+
 // definition | theorem | remark — have terms
-interface ContentDefinitionData extends ContentObjectBase {
+interface ContentDefinitionData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'definition';
   namespacePath: string;
   terms:      ContentTerm[];
@@ -112,7 +126,7 @@ interface ContentDefinitionData extends ContentObjectBase {
 // (theorem and remark follow the same shape with type: 'theorem' | 'remark')
 
 // proof — no terms
-interface ContentProofData extends ContentObjectBase {
+interface ContentProofData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'proof';
   namespacePath: string;
   references: ContentReference[];
@@ -160,7 +174,7 @@ interface ContentTargetObject {
 }
 ```
 
-`ContentBlock` is a discriminated union of 12 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`, `recall`.
+`ContentBlock` is a discriminated union of 11 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`.
 
 A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a term, `name` is the English id a reference resolves against and `slug` is the localized anchor segment, `''` when the file has none — legal content, since the site falls back to `name`. A save is refused if a non-empty slug is not lowercase kebab-case, or if two claims (or two terms) on one node resolve to the same anchor.
 
@@ -180,6 +194,7 @@ interface SaveDefinitionParams {
   body:       ContentBlock[];
   terms:      ContentTerm[];
   references: ContentReference[];
+  label?:     string;   // omitted for the type's default, which removes `label` from the file
 }
 
 // proof | section — no terms
@@ -188,6 +203,7 @@ interface SaveProofOrSectionParams {
   entityType: 'proof' | 'section';
   body:       ContentBlock[];
   references: ContentReference[];
+  label?:     string;   // proof only
 }
 
 // chapter — no body, four named block arrays
@@ -206,7 +222,7 @@ interface SaveChapterParams {
 
 The extension host:
 1. Looks up the YAML file path from `content.idToFilePath.get(id)`.
-2. Reads the existing YAML from disk and merges the wire blocks back using `blockToYaml` / `mergeBlocks` (which preserves `embed` and `recall` blocks verbatim from the original YAML, since their target references are runtime-generated IDs that cannot be reconstructed from the wire format).
+2. Reads the existing YAML from disk and merges the wire blocks back using `blockToYaml` / `mergeBlocks` (which preserves `embed` blocks verbatim from the original YAML, since their target references are runtime-generated IDs that cannot be reconstructed from the wire format).
 3. Writes the updated YAML back to disk with `lineWidth: 120`.
 4. Updates the in-memory model in-place: `updateModelBlocks` patches editable block fields; `updateModelTerms` and `updateModelRefs` add, update, and remove term/reference entries in the cached model and keep `idToObject` consistent.
 5. Calls `PanelManager.setDirty(id, false)` (internal method) which removes the `●` prefix from the tab title.
@@ -247,9 +263,10 @@ The extension host promotes the editor panel out of preview mode and opens the o
 The extension host:
 1. Checks whether any open panel has unsaved changes. If so, shows an error message and returns the current tree without reloading.
 2. Closes all open editor panels via `PanelManager.closeAll()`, capturing their file paths.
-3. Resets the content cache via `resetContentCache()` and reloads from disk.
-4. Reopens panels for any file path that still exists in the new model, preserving panel order.
-5. Restores `selectedId` to the new model ID corresponding to the previously selected file, or falls back to the last reopened panel.
+3. Rereads `locales.json` and `entity-labels.json` from the services checkout (`youproof.servicesRoot`). If `locales.json` is missing or invalid, shows an error message naming its path and the setting, and rejects without loading content; the sidebar shows the error with a Retry button. A bad `entity-labels.json` also shows an error message naming its path, but doesn't stop the reload: entity data then carries `labelRegistryError` instead of `labelVariants`.
+4. Resets the content cache via `resetContentCache()` and reloads from disk.
+5. Reopens panels for any file path that still exists in the new model, preserving panel order.
+6. Restores `selectedId` to the new model ID corresponding to the previously selected file, or falls back to the last reopened panel.
 
 ---
 

@@ -82,6 +82,12 @@ body {
   white-space: nowrap;
 }
 
+.field-input.entity-label-picker {
+  display: block;
+  width: auto;
+  margin-bottom: 6px;
+}
+
 .entity-dirty {
   font-size: 16px;
   color: var(--vscode-descriptionForeground);
