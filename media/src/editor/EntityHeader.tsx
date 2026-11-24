@@ -21,9 +21,9 @@ export default function EntityHeader({ nodeId, type, title, isDirty, entityLabel
       <div className="entity-header">
         <span className={`entity-badge badge-${type}`}>{badge}</span>
         <span className="entity-title">{title}</span>
-        {entityLabel && <EntityLabelPicker {...entityLabel} onChange={onLabelChange} />}
         {isDirty && <span className="entity-dirty">●</span>}
       </div>
+      {entityLabel && <EntityLabelPicker {...entityLabel} onChange={onLabelChange} />}
       {entityLabel && <EntityLabelHints {...entityLabel} />}
       <button
         className="open-file-btn"

@@ -82,9 +82,10 @@ body {
   white-space: nowrap;
 }
 
-.entity-label-picker {
+.field-input.entity-label-picker {
+  display: block;
   width: auto;
-  flex-shrink: 0;
+  margin-bottom: 6px;
 }
 
 .entity-dirty {
