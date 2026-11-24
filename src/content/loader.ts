@@ -7,12 +7,11 @@ import type {
   Namespace, Definition, Theorem, Proof, Remark,
   Term, Reference, RefTarget, RefTargetType, RefParent,
   ContentBlock, BlockParent,
-  SubsectionBlock, DetailsBlock, EmbedBlock, RecallBlock,
-  Labels, LabelCase,
+  SubsectionBlock, DetailsBlock, EmbedBlock,
+  EntityLabelFields,
 } from './model';
 import { isExternalTarget, parseFqn, type FqnKind } from './fqn';
 import { normalizeStrings } from './normalize';
-import { DEFAULT_LOCALE } from './locales';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
 
@@ -30,13 +29,6 @@ function genId(): string {
   return Math.random().toString().slice(2, 18).padEnd(16, '0');
 }
 
-// A content file's locale: its `locale` field, else the default locale (so files
-// predating the locale migration still load under the default).
-function localeOf(data: Record<string, unknown>): string {
-  const v = data['locale'];
-  return typeof v === 'string' && v.trim() !== '' ? v.trim() : DEFAULT_LOCALE;
-}
-
 // ─── Canonical key helpers (match website/lib/content/graph.ts) ───────────────
 
 function entityKey(ns: string, name: string) { return `/entities${ns}/${name}`; }
@@ -52,7 +44,15 @@ function sectionKey(b: string, p: string, c: string, s: string) { return `/books
 // so the in-memory model never mixes locales. A locale with no content yields an
 // empty model (no error) — that's what makes the per-locale reload buttons
 // forward-compatible before other locales exist.
-export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE): LoadedContent {
+export function loadContent(contentRoot: string, locale: string, siteDefaultLocale: string = locale): LoadedContent {
+  // A content file's locale: its `locale` field, else the first locale in locales.json,
+  // which is the website's default when its DEFAULT_LOCALE build setting is unset. Not
+  // youproof.defaultLocale, which only picks the locale the editor opens with.
+  function localeOf(data: Record<string, unknown>): string {
+    const v = data['locale'];
+    return typeof v === 'string' && v.trim() !== '' ? v.trim() : siteDefaultLocale;
+  }
+
   const idToFilePath = new Map<string, string>();
   const filePathToId = new Map<string, string>();
   const idToObject   = new Map<string, unknown>();
@@ -125,25 +125,11 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
     const v = obj[key]; return Array.isArray(v) ? v.map(String) : [];
   }
 
-  function parseLabels(raw: unknown): Labels | undefined {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-    const obj = raw as Record<string, unknown>;
-    const canonical = str(obj, 'canonical', '');
-    if (!canonical) return undefined;
-    const cr = obj['cases'];
-    const cases: Record<string, LabelCase> = {};
-    if (cr && typeof cr === 'object' && !Array.isArray(cr)) {
-      for (const [k, v] of Object.entries(cr as Record<string, unknown>)) {
-        if (v && typeof v === 'object' && !Array.isArray(v)) {
-          const vc = v as Record<string, unknown>;
-          cases[k] = {
-            base:   typeof vc['base']   === 'string' ? vc['base']   : undefined,
-            suffix: typeof vc['suffix'] === 'string' ? vc['suffix'] : undefined,
-          };
-        }
-      }
-    }
-    return { canonical, cases: Object.keys(cases).length ? cases : undefined };
+  function readLabelFields(data: Record<string, unknown>): EntityLabelFields {
+    return {
+      ...(typeof data['label'] === 'string' ? { label: data['label'] } : {}),
+      ...('labels' in data ? { hasLabelsBlock: true } : {}),
+    };
   }
 
   function parseLogo(raw: unknown): { src: string; alt: string } | undefined {
@@ -270,11 +256,6 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
           };
           enqueueTarget(b['target'], r => { emb.target = r; });
           block = emb; break;
-        }
-        case 'recall': {
-          const rec: RecallBlock = { id, blockType: 'recall', target: { type: 'external', target: '' }, context, parent };
-          enqueueTarget(b['target'], r => { rec.target = r; });
-          block = rec; break;
         }
         case 'claim':
           block = { id, blockType: 'claim', name: str(b, 'name', id), slug: str(b, 'slug', ''), content: str(b, 'content', ''), formula: b['formula'] as string | undefined, context, parent }; break;
@@ -492,7 +473,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
         const def: Definition = {
           id, filePath, type: 'definition', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
-          labels: parseLabels(data['labels']),
+          ...readLabelFields(data),
           terms: [], references: [], body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, def); regRef(key, id);
@@ -510,7 +491,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
         const thm: Theorem = {
           id, filePath, type: 'theorem', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
-          labels: parseLabels(data['labels']),
+          ...readLabelFields(data),
           terms: [], references: [], body: [], proofs: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, thm); regRef(key, id);
@@ -528,6 +509,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
       if (folder === 'proofs') {
         const proof: Proof = {
           id, filePath, type: 'proof', name, namespacePath: nsPath, locale: localeOf(data),
+          ...readLabelFields(data),
           references: [], body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, proof); regRef(key, id);
@@ -541,6 +523,7 @@ export function loadContent(contentRoot: string, locale: string = DEFAULT_LOCALE
       // remarks
       const rem: Remark = {
         id, filePath, type: 'remark', name, namespacePath: nsPath, locale: localeOf(data),
+        ...readLabelFields(data),
         terms: [], references: [], body: [], namespace,
       };
       registerFile(id, filePath); reg(id, rem); regRef(key, id);

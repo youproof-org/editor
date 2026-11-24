@@ -5,8 +5,11 @@ export type NodeType =
   | 'namespace'
   | 'definition' | 'theorem' | 'proof' | 'remark';
 
-export interface LabelCase { base?: string; suffix?: string; }
-export interface Labels { canonical: string; cases?: Record<string, LabelCase>; }
+// `label` names a variant in the services label registry (mirrored in
+// src/protocol/entityLabels.ts); absent means the type's default. `hasLabelsBlock`
+// flags a file that still carries the per-entity `labels` block the site now
+// rejects, so the editor can refuse to save it instead of rewriting it.
+export interface EntityLabelFields { label?: string; hasLabelsBlock?: boolean; }
 
 // ─── Term (inline, no file) ───────────────────────────────────────────────────
 
@@ -99,14 +102,13 @@ export interface QuoteBlock        extends BlockBase { blockType: 'quote';      
 export interface SubsectionBlock   extends BlockBase { blockType: 'subsection';     title: string; blocks: ContentBlock[]; }
 export interface DetailsBlock      extends BlockBase { blockType: 'details';        title?: string; blocks: ContentBlock[]; }
 export interface EmbedBlock        extends BlockBase { blockType: 'embed';          target: RefTarget; showTitle?: boolean; }
-export interface RecallBlock       extends BlockBase { blockType: 'recall';         target: RefTarget; }
 export interface ClaimBlock        extends BlockBase { blockType: 'claim';          name: string; slug: string; content: string; formula?: string; }
 
 export type ContentBlock =
   | NarrativeBlock | FormulaBlock | FigureBlock
   | OrderedListBlock | UnorderedListBlock | TypewriterBlock | QuoteBlock
   | SubsectionBlock | DetailsBlock
-  | EmbedBlock | RecallBlock | ClaimBlock;
+  | EmbedBlock | ClaimBlock;
 
 // ─── Book hierarchy ───────────────────────────────────────────────────────────
 
@@ -180,10 +182,10 @@ export interface Namespace {
   parent: Namespace | null;
 }
 
-export interface Definition {
+export interface Definition extends EntityLabelFields {
   id: string; filePath: string; type: 'definition';
   name: string; namespacePath: string; locale: string;
-  title?: string; labels?: Labels;
+  title?: string;
   terms: Term[];
   references: Reference[];
   body: ContentBlock[];
@@ -191,10 +193,10 @@ export interface Definition {
   namespace: Namespace;
 }
 
-export interface Theorem {
+export interface Theorem extends EntityLabelFields {
   id: string; filePath: string; type: 'theorem';
   name: string; namespacePath: string; locale: string;
-  title?: string; labels?: Labels;
+  title?: string;
   terms: Term[];
   references: Reference[];
   body: ContentBlock[];
@@ -203,7 +205,7 @@ export interface Theorem {
   namespace: Namespace;
 }
 
-export interface Proof {
+export interface Proof extends EntityLabelFields {
   id: string; filePath: string; type: 'proof';
   name: string; namespacePath: string; locale: string;
   references: Reference[];
@@ -212,7 +214,7 @@ export interface Proof {
   namespace: Namespace;
 }
 
-export interface Remark {
+export interface Remark extends EntityLabelFields {
   id: string; filePath: string; type: 'remark';
   name: string; namespacePath: string; locale: string;
   terms: Term[];

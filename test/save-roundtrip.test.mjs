@@ -143,6 +143,7 @@ name: proba-tetel
 slug: proba-tetel
 locale: hu
 title: Próba tétel
+label: lemma
 proofs:
   - proba-bizonyitas
 remarks: []
@@ -571,4 +572,55 @@ test('saving through the panel writes the same paths as saving from the model', 
   const direct = chapterDoc(saveAll(fixture())).references
   const panel  = chapterDoc(saveAllThroughPanel(fixture())).references
   assert.deepEqual(panel, direct)
+})
+
+// ---------------------------------------------------------------------------
+// Entity label variants
+//
+// An entity names its label variant with `label`, absent for the type's default.
+// The per-entity `labels` block it replaced is rejected by the site build, so a
+// file that still has one must not be saved, neither dropped nor kept.
+// ---------------------------------------------------------------------------
+
+const THM_REL = path.join('knowledge-base', 'proba', 'theorems', 'proba-tetel.yaml')
+
+test('a label variant survives a save, right after title', () => {
+  const thm = doc(saveAll(fixture())[THM_REL])
+  assert.equal(thm.label, 'lemma')
+  const keys = Object.keys(thm)
+  assert.equal(keys[keys.indexOf('title') + 1], 'label')
+})
+
+test('a label variant survives the round trip through the panel', () => {
+  assert.equal(doc(saveAllThroughPanel(fixture())[THM_REL]).label, 'lemma')
+})
+
+test('choosing the default variant removes label from the file', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, THM_REL)
+  delete obj.label
+  saveFromModel(id, content)
+  assert.ok(!('label' in doc(readFileSync(path.join(root, THM_REL), 'utf8'))))
+})
+
+test('a label set on a proof is written to the file', () => {
+  const root = fixture()
+  const rel = path.join('knowledge-base', 'proba', 'proofs', 'proba-bizonyitas.yaml')
+  const { content, id, obj } = nodeFor(root, rel)
+  obj.label = 'proof'
+  saveFromModel(id, content)
+  assert.equal(doc(readFileSync(path.join(root, rel), 'utf8')).label, 'proof')
+})
+
+test('a file with a labels block refuses to save, and the file is left untouched', () => {
+  const root = fixture()
+  const file = path.join(root, THM_REL)
+  writeFileSync(file, readFileSync(file, 'utf8').replace('label: lemma\n',
+    'labels:\n  canonical: lemma\n  cases:\n    in: { base: lemmá, suffix: ban }\n'))
+  const before = readFileSync(file, 'utf8')
+  const { content, id, obj } = nodeFor(root, THM_REL)
+  assert.equal(obj.hasLabelsBlock, true)
+  assert.equal(obj.label, undefined)
+  assert.throws(() => saveFromModel(id, content), /still has a 'labels' block/)
+  assert.equal(readFileSync(file, 'utf8'), before, 'nothing was written')
 })

@@ -12,7 +12,6 @@ import FigureBlock        from './blocks/FigureBlock';
 import SubsectionBlock    from './blocks/SubsectionBlock';
 import DetailsBlock       from './blocks/DetailsBlock';
 import EmbedBlock         from './blocks/EmbedBlock';
-import RecallBlock        from './blocks/RecallBlock';
 import type { ContentBlock, ContentClaimBlock } from '../shared/types';
 
 interface Props {
@@ -32,7 +31,6 @@ const HEADER_LABEL: Record<ContentBlock['blockType'], (b: ContentBlock) => strin
   quote:            () => 'Quote Block',
   subsection:       () => 'Subsection Block',
   details:          () => 'Details Block',
-  recall:           () => 'Recall Block',
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,7 +46,6 @@ const BLOCK_COMPONENT: Record<ContentBlock['blockType'], React.ComponentType<{ b
   quote:            QuoteBlock,
   subsection:       SubsectionBlock,
   details:          DetailsBlock,
-  recall:           RecallBlock,
 };
 
 export default function BlockView({ block, onBlockChange }: Props) {
