@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { EditorState, Annotation, Prec } from '@codemirror/state';
 import { EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate, keymap } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Range } from '@codemirror/state';
 import { maskFormulas } from '../shared/formula';
 import { useBracketEditingContext } from './contexts/BracketEditingContext';
-import { useRefTermEditingContext } from './contexts/RefTermEditingContext';
-import SuggestionPopup, { AnchorRect } from './SuggestionPopup';
-import { useSuggestionPopup } from './hooks/useSuggestionPopup';
-import RefSuggestionRow from './RefSuggestionRow';
+import { useTermEditingContext } from './contexts/TermEditingContext';
 import type { BracketInfo, RenameEvent } from './contexts/BracketEditingContext';
-import type { RefSuggestion } from '../shared/types';
 
 interface Props {
   value: string;
@@ -21,26 +17,12 @@ interface Props {
   allowSelfReference?: boolean;
 }
 
-function findSingleBracketCtx(doc: string, pos: number): { start: number; end: number; name: string } | null {
-  let i = pos - 1;
-  while (i >= 0 && doc[i] !== '[' && doc[i] !== ']' && doc[i] !== '\n') i--;
-  if (i < 0 || doc[i] !== '[') return null;
-  if (i > 0 && doc[i - 1] === '[') return null;
-  let j = pos;
-  while (j < doc.length && doc[j] !== ']' && doc[j] !== '[' && doc[j] !== '\n') j++;
-  if (j >= doc.length || doc[j] !== ']') return null;
-  if (j + 1 < doc.length && doc[j + 1] === ']') return null;
-  const name = doc.slice(i + 1, j);
-  if (name === '*') return null;
-  return { start: i + 1, end: j, name };
-}
-
 const ExternalUpdate    = Annotation.define<boolean>();
 const BracketAutoEdit   = Annotation.define<boolean>();
 
 // Order matters: [[...]] before [...] so double brackets are matched first.
-// Groups: 1 = term, 2 = self-ref [*], 3 = ref, 4 = formula.
-const SYNTAX_RE = /\[\[([a-zA-Z0-9\-]+)\]\]|\[(\*)\]|\[([a-zA-Z0-9\-]+)\]|\$([^$\n]+)\$/g;
+// Groups: 1 = term, 2 = self-ref [*], 3 = reference index [i], 4 = formula.
+const SYNTAX_RE = /\[\[([a-zA-Z0-9\-]+)\]\]|\[(\*)\]|\[(\d+)\]|\$([^$\n]+)\$/g;
 
 function buildDecos(view: EditorView, supportsTerms: boolean): DecorationSet {
   const deco: Range<Decoration>[] = [];
@@ -132,7 +114,9 @@ function isInsideEmptySingleBracket(doc: string, pos: number): boolean {
   return true;
 }
 
-function bracketInfoAt(state: EditorState, pos: number): BracketInfo | null {
+interface BracketAt { type: 'single' | 'term'; name: string; }
+
+function bracketInfoAt(state: EditorState, pos: number): BracketAt | null {
   const doc = state.doc.toString();
 
   // Scan backward for opening bracket
@@ -155,7 +139,7 @@ function bracketInfoAt(state: EditorState, pos: number): BracketInfo | null {
   const name = doc.slice(nameStart, j);
   if (name.length === 0) return null;
 
-  return { type: isDouble ? 'term' : 'ref', name };
+  return { type: isDouble ? 'term' : 'single', name };
 }
 
 interface BracketSpan {
@@ -209,15 +193,12 @@ function applyRenameToView(view: EditorView, event: RenameEvent): void {
   // Scan masked text so occurrences inside $...$ formulas are skipped; masking
   // preserves offsets, so the change ranges still map onto the real document.
   const text = maskFormulas(view.state.doc.toString());
-  const escaped = escapeRegex(event.oldName);
-  const re = event.type === 'ref'
-    ? new RegExp(`(?<!\\[)\\[${escaped}\\](?!\\])`, 'g')
-    : new RegExp(`\\[\\[${escaped}\\]\\]`, 'g');
+  const re = new RegExp(`\\[\\[${escapeRegex(event.oldName)}\\]\\]`, 'g');
 
   const changes: { from: number; to: number; insert: string }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const nameStart = event.type === 'ref' ? m.index + 1 : m.index + 2;
+    const nameStart = m.index + 2;
     const nameEnd   = nameStart + event.oldName.length;
     changes.push({ from: nameStart, to: nameEnd, insert: event.newName });
   }
@@ -244,55 +225,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
   const allowSelfRefRef = useRef(allowSelfReference);
   allowSelfRefRef.current = allowSelfReference;
   const ctx = useBracketEditingContext();
-  const refTermCtx = useRefTermEditingContext();
-  const fetchRefSuggestions = ctx.fetchRefSuggestions;
-  const fetchRefSuggestionsRef = useRef(fetchRefSuggestions);
-  fetchRefSuggestionsRef.current = fetchRefSuggestions;
-
-  // ─── Ref-suggestion popup (only active when fetchRefSuggestions is provided) ──
-  const [refBracketCtx, setRefBracketCtx] =
-    useState<{ start: number; end: number; name: string; anchorRect: AnchorRect } | null>(null);
-  // Type-to-open gate: the popup is shown only after the user actually types
-  // into the bracket. Cursor movement / focus alone won't reopen it; Escape
-  // toggles it back off until the next character typed.
-  const [popupOpenedByTyping, setPopupOpenedByTyping] = useState(false);
-
-  const commitRefSuggestion = useCallback((r: RefSuggestion) => {
-    const view = viewRef.current;
-    if (!view || !refBracketCtx) return;
-    refTermCtx.ensureRefFromSuggestion(r);
-    view.dispatch({
-      changes:   { from: refBracketCtx.start, to: refBracketCtx.end, insert: r.name },
-      selection: { anchor: refBracketCtx.start + r.name.length + 1 },
-      annotations: BracketAutoEdit.of(true),
-    });
-    view.focus();
-    setRefBracketCtx(null);
-  }, [refBracketCtx, refTermCtx]);
-
-  const refPopupFetcher = (fetchRefSuggestions && refBracketCtx)
-    ? () => fetchRefSuggestions(refBracketCtx.name)
-    : null;
-
-  const refPopup = useSuggestionPopup<RefSuggestion>({
-    typed:        refBracketCtx?.name ?? '',
-    fetchItems:   refPopupFetcher,
-    getKey:       (r) => r.name,
-    getMatchText: (r) => r.display,
-    onCommit:     commitRefSuggestion,
-    filterAndSort: false,
-  });
-
-  // Mirror the bracket state into the popup hook (open/close + re-fetch on name change).
-  // Gated by popupOpenedByTyping so the popup never appears from cursor-only movement.
-  useEffect(() => {
-    if (refBracketCtx && fetchRefSuggestionsRef.current && popupOpenedByTyping) refPopup.open();
-    else refPopup.close();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refBracketCtx?.start, refBracketCtx?.end, refBracketCtx?.name, popupOpenedByTyping]);
-
-  const refPopupRef = useRef(refPopup);
-  refPopupRef.current = refPopup;
+  const termCtx = useTermEditingContext();
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -440,24 +373,11 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
       { key: 'Delete',    run: () => onSpecialKeyRef.current?.('Delete')    ?? false },
     ]));
 
-    // Highest-precedence keymap so the suggestion popup wins over default
-    // ArrowUp/Down/Enter/Escape when it's open and a row is selected.
-    const refPopupKeymap = Prec.highest(keymap.of([
-      { key: 'ArrowDown', run: () => refPopupRef.current.navigateDown() },
-      { key: 'ArrowUp',   run: () => refPopupRef.current.navigateUp() },
-      { key: 'Escape',    run: () => {
-        if (refPopupRef.current.active) { setPopupOpenedByTyping(false); return true; }
-        return false;
-      } },
-      { key: 'Enter',     run: () => refPopupRef.current.commitSelected() },
-    ]));
-
     const view = new EditorView({
       state: EditorState.create({
         doc: value,
         extensions: [
           history(),
-          refPopupKeymap,
           specialKeymap,
           bracketInputHandler,
           bracketDeleteKeymap,
@@ -475,14 +395,12 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
               return;
             }
 
-            const filterTerms = (info: BracketInfo | null) =>
-              info?.type === 'term' && !ctx.supportsTerms ? null : info;
-            const filterSelfRef = (info: BracketInfo | null) =>
-              info?.name === '*' ? null : info;
+            const termAt = (info: BracketAt | null): BracketInfo | null =>
+              info?.type === 'term' && ctx.supportsTerms ? { type: 'term', name: info.name } : null;
 
             const isExternal = update.transactions.some(t => t.annotation(ExternalUpdate));
             if (isExternal) {
-              prevInfo = filterSelfRef(filterTerms(bracketInfoAt(update.state, update.state.selection.main.head)));
+              prevInfo = termAt(bracketInfoAt(update.state, update.state.selection.main.head));
               if (update.docChanged) onChangeRef.current?.(update.state.doc.toString());
               return;
             }
@@ -490,7 +408,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
             if (update.focusChanged && update.view.hasFocus) {
               ctx.onFieldFocused((info) => {
                 const pos  = view.state.selection.main.head;
-                const text = info.type === 'ref' ? `[${info.name}]` : `[[${info.name}]]`;
+                const text = `[[${info.name}]]`;
                 view.dispatch({
                   changes:   { from: pos, to: pos, insert: text },
                   selection: { anchor: pos + text.length },
@@ -511,7 +429,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
             const doc     = update.state.doc.toString();
             const newInfo = isInsideFormula(doc, cursor)
               ? null
-              : filterSelfRef(filterTerms(bracketInfoAt(update.state, cursor)));
+              : termAt(bracketInfoAt(update.state, cursor));
 
             const oldPrevInfo = prevInfo;
 
@@ -532,35 +450,6 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
             if (update.docChanged && oldPrevInfo && !newInfo) {
               ctx.onBracketEmpty(oldPrevInfo);
             }
-
-            // Update ref-suggestion bracket context if a fetcher is provided.
-            // popupOpenedByTyping is set true on any doc change while the cursor sits
-            // inside a single bracket; cleared whenever the cursor leaves or the field blurs.
-            if (fetchRefSuggestionsRef.current && update.view.hasFocus) {
-              const docStr  = update.state.doc.toString();
-              const cursor2 = update.state.selection.main.head;
-              const found   = isInsideFormula(docStr, cursor2)
-                ? null
-                : findSingleBracketCtx(docStr, cursor2);
-              if (found) {
-                const c = update.view.coordsAtPos(found.start);
-                if (c) {
-                  const anchorRect: AnchorRect = { top: c.top, bottom: c.bottom, left: c.left, right: c.right };
-                  setRefBracketCtx(prev =>
-                    prev && prev.start === found.start && prev.end === found.end && prev.name === found.name
-                      ? prev
-                      : { ...found, anchorRect }
-                  );
-                }
-                if (update.docChanged) setPopupOpenedByTyping(true);
-              } else {
-                setRefBracketCtx(null);
-                setPopupOpenedByTyping(false);
-              }
-            } else if (!update.view.hasFocus) {
-              setRefBracketCtx(null);
-              setPopupOpenedByTyping(false);
-            }
           }),
         ],
       }),
@@ -569,7 +458,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
     viewRef.current = view;
 
     const unsubscribe = bracketAutocomplete
-      ? refTermCtx.subscribeToRename(event => {
+      ? termCtx.subscribeToRename(event => {
           if (viewRef.current) applyRenameToView(viewRef.current, event);
         })
       : undefined;
@@ -588,24 +477,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
     }
   }, [value]);
 
-  return (
-    <>
-      <div ref={containerRef} className="cm-field" />
-      {refPopup.active && refPopup.displayed.length > 0 && refBracketCtx && (
-        <SuggestionPopup<RefSuggestion>
-          items={refPopup.displayed}
-          selectedIdx={refPopup.selectedIdx}
-          getKey={(r) => r.name}
-          renderItem={(r) => <RefSuggestionRow item={r} typed={refBracketCtx.name} />}
-          renderContainer={(children) => <div className="ref-display-suggestions__table">{children}</div>}
-          anchorRect={refBracketCtx.anchorRect}
-          preferred="below"
-          onPick={(r) => commitRefSuggestion(r)}
-          selectedItemRef={refPopup.selectedItemRef}
-        />
-      )}
-    </>
-  );
+  return <div ref={containerRef} className="cm-field" />;
 });
 
 export default CodeMirrorField;

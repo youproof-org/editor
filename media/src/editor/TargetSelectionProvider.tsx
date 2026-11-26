@@ -4,7 +4,6 @@ import { useTargetSelection } from './hooks/useTargetSelection';
 import type { ContentObjectData, ContentTargetObject } from '../shared/types';
 
 interface Props {
-  draftRef:         React.MutableRefObject<ContentObjectData | null>;
   setDraft:         Dispatch<SetStateAction<ContentObjectData | null>>;
   setTargetObjects: Dispatch<SetStateAction<Record<string, ContentTargetObject>>>;
   markDirty:        () => void;
@@ -13,15 +12,14 @@ interface Props {
 }
 
 export default function TargetSelectionProvider({
-  draftRef, setDraft, setTargetObjects, markDirty, targetObjects, children,
+  setDraft, setTargetObjects, markDirty, targetObjects, children,
 }: Props) {
   const {
     selectingSelectorId,
-    handleRefTargetChange,
     handleBeginSelectTarget,
     handleEndSelectTarget,
     handleOpenTarget,
-  } = useTargetSelection({ draftRef, setDraft, setTargetObjects, markDirty });
+  } = useTargetSelection({ setDraft, setTargetObjects, markDirty });
 
   const value = useMemo(() => ({
     targetObjects,
@@ -29,8 +27,7 @@ export default function TargetSelectionProvider({
     onBeginSelectTarget: handleBeginSelectTarget,
     onEndSelectTarget:   handleEndSelectTarget,
     onOpenTarget:        handleOpenTarget,
-    onRefTargetChange:   handleRefTargetChange,
-  }), [targetObjects, selectingSelectorId, handleBeginSelectTarget, handleEndSelectTarget, handleOpenTarget, handleRefTargetChange]);
+  }), [targetObjects, selectingSelectorId, handleBeginSelectTarget, handleEndSelectTarget, handleOpenTarget]);
 
   return <TargetSelectionContext.Provider value={value}>{children}</TargetSelectionContext.Provider>;
 }

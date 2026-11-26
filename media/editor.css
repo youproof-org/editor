@@ -400,10 +400,6 @@ details > summary:hover { opacity: 0.8; }
 
 .refs-table { width: 100%; border-collapse: collapse; table-layout: auto; font-size: var(--vscode-font-size); }
 
-.refs-table--refs  th:nth-child(2),  .refs-table--refs  td:nth-child(2),
-.refs-table--refs  th:nth-child(4),  .refs-table--refs  td:nth-child(4)
-{ min-width: 100px; }
-
 /* Name, slug, display and canonical — one more column since YP-173 added slug. */
 .refs-table--terms th:nth-child(2),  .refs-table--terms td:nth-child(2),
 .refs-table--terms th:nth-child(3),  .refs-table--terms td:nth-child(3),
@@ -439,7 +435,6 @@ details > summary:hover { opacity: 0.8; }
 .refs-table td                { padding: 2px 4px; vertical-align: middle; }
 .refs-table-th--icon          { padding: 0 !important; border-bottom: 1px solid var(--vscode-widget-border, #454545); }
 .refs-table-td--icon          { padding: 2px 4px; text-align: center; }
-.ref-row-icon                 { color: #9b72d0; font-size: 13px; }
 
 .ref-input {
   width: 100%;
@@ -464,7 +459,6 @@ details > summary:hover { opacity: 0.8; }
 .field-input--warn    { border-color: var(--vscode-editorWarning-foreground, #cca700) !important; }
 .field-hint { color: var(--vscode-descriptionForeground); font-size: 10px; padding: 2px 0 0 2px; }
 
-.ref-target-cell  { display: flex; align-items: center; gap: 5px; padding: 2px 6px; white-space: nowrap; }
 .target-selector  { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .ref-target-label { color: var(--vscode-descriptionForeground); font-size: var(--vscode-font-size); }
 
@@ -676,63 +670,6 @@ details > summary:hover { opacity: 0.8; }
 .ref-display-suggestion-item strong {
   color: var(--vscode-list-highlightForeground);
   font-weight: 600;
-}
-
-/* Table-mode popup: 3-column grid wrapper rendered by CodeMirrorField via renderContainer.
-   Rows participate in this grid via display:contents. */
-.ref-display-suggestions__table {
-  display: grid;
-  grid-template-columns: minmax(0, max-content) minmax(0, max-content) minmax(0, max-content);
-}
-
-.ref-display-suggestions__table > .ref-display-suggestion-item,
-.ref-display-suggestions__table > .ref-display-suggestion-item > .ref-suggestion-row {
-  display: contents;
-}
-
-/* Per-cell box: padding/line-height move off the item wrapper (which is display:contents).
-   Cells scroll horizontally when their column has been shrunk below max-content;
-   scrollLeft is set programmatically by RefSuggestionRow's autoscroll-to-mark effect. */
-.ref-display-suggestions__table .ref-suggestion-row > * {
-  padding: 2px 8px;
-  line-height: 22px;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow-x: auto;
-}
-
-.ref-display-suggestions__table .ref-suggestion-row > * { scrollbar-width: none; }
-.ref-display-suggestions__table .ref-suggestion-row > *::-webkit-scrollbar { display: none; }
-
-.ref-display-suggestions__table .ref-display-suggestion-item:hover > .ref-suggestion-row > * {
-  background: var(--vscode-list-hoverBackground);
-}
-.ref-display-suggestions__table .ref-display-suggestion-item--selected > .ref-suggestion-row > * {
-  background: var(--vscode-quickInputList-focusBackground, var(--vscode-list-activeSelectionBackground, #094771));
-  color:      var(--vscode-quickInputList-focusForeground, var(--vscode-list-activeSelectionForeground, #ffffff));
-}
-
-.ref-suggestion-key {
-  font-family: var(--vscode-editor-font-family, monospace);
-  color: var(--vscode-textPreformat-foreground, var(--vscode-foreground));
-  white-space: nowrap;
-}
-
-.ref-suggestion-target {
-  opacity: 0.85;
-  white-space: nowrap;
-}
-
-.ref-display-suggestions__table .ref-suggestion-target .entity-badge {
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-/* Rows sourced from other objects render italic so they're visually distinct
-   from current-object refs. font-style inherits through display: contents
-   row wrappers down to the three cell spans. */
-.ref-suggestion-row--other {
-  font-style: italic;
 }
 
 /* ─── Row insert button ─────────────────────────────────────────────────────── */

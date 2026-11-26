@@ -19,21 +19,17 @@ export function useSaveOnCtrlS({ nodeId, draft, isDirtyRef, setIsDirty, setError
   const client = useClient();
 
   const save = useCallback((d: ContentObjectData) => {
-    const bodyText    = getAllBlocksText(d);
-    const refsToSave  = sortByOccurrence(d.references, bodyText, 'ref');
-    const termsToSave = 'terms' in d ? sortByOccurrence(d.terms, bodyText, 'term') : undefined;
+    const termsToSave = 'terms' in d ? sortByOccurrence(d.terms, getAllBlocksText(d)) : undefined;
 
     let params: SaveContentObjectRequest;
     if (d.type === 'chapter') {
       params = { id: nodeId, entityType: 'chapter',
         abstract: d.abstract, prerequisiteWarning: d.prerequisiteWarning,
-        prologue: d.prologue, epilogue: d.epilogue,
-        references: refsToSave } as SaveChapterObjectRequest;
+        prologue: d.prologue, epilogue: d.epilogue } as SaveChapterObjectRequest;
     } else {
       const labelToSave = d.type === 'section' ? undefined : d.label;
       params = {
         id: nodeId, entityType: d.type, body: d.body,
-        references: refsToSave,
         ...(termsToSave ? { terms: termsToSave } : {}),
         ...(labelToSave ? { label: labelToSave } : {}),
       } as SaveContentObjectRequest;

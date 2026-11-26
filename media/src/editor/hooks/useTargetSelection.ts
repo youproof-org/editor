@@ -11,30 +11,18 @@ import type {
 } from '../../shared/types';
 
 interface Params {
-  draftRef:         React.MutableRefObject<ContentObjectData | null>;
   setDraft:         Dispatch<SetStateAction<ContentObjectData | null>>;
   setTargetObjects: Dispatch<SetStateAction<Record<string, ContentTargetObject>>>;
   markDirty:        () => void;
 }
 
-export function useTargetSelection({ draftRef, setDraft, setTargetObjects, markDirty }: Params) {
+export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Params) {
   const client = useClient();
   const [selectingSelectorId, setSelectingSelectorId] = useState<string | null>(null);
   // True iff this panel initiated the currently-in-flight target selection.
   // `targetSelectionEnded` is broadcast to all panels, so without this gate
   // every panel would call markDirty() on every successful selection.
   const initiatedByThisPanelRef = useRef(false);
-
-  const handleRefTargetChange = useCallback((refId: string, target: ContentTargetObject | null) => {
-    setDraft(prev => {
-      if (!prev) return prev;
-      return { ...prev, references: prev.references.map(r =>
-        r.id === refId ? { ...r, targetId: target?.id } : r
-      )};
-    });
-    if (target) setTargetObjects(prev => ({ ...prev, [target.id]: target }));
-    markDirty();
-  }, [markDirty]);
 
   const handleBlockTargetChange = useCallback((blockId: string, target: ContentTargetObject | null) => {
     const updateBlock = (b: ContentBlock): ContentBlock => {
@@ -72,10 +60,7 @@ export function useTargetSelection({ draftRef, setDraft, setTargetObjects, markD
       setSelectingSelectorId(null);
       if (!initiatedByThisPanelRef.current) return;
       initiatedByThisPanelRef.current = false;
-      if (!result) return;
-      const isRef = !!draftRef.current?.references.find(r => r.id === selectorId);
-      if (isRef) handleRefTargetChange(selectorId, result);
-      else handleBlockTargetChange(selectorId, result);
+      if (result) handleBlockTargetChange(selectorId, result);
     });
   }, []);
 
@@ -98,7 +83,6 @@ export function useTargetSelection({ draftRef, setDraft, setTargetObjects, markD
 
   return {
     selectingSelectorId,
-    handleRefTargetChange,
     handleBeginSelectTarget,
     handleEndSelectTarget,
     handleOpenTarget,

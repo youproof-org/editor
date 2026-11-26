@@ -7,7 +7,6 @@ export interface TargetSelectionContextValue {
   onBeginSelectTarget: (selectorId: string, allowedTypes: string[]) => void;
   onEndSelectTarget:   (result: ContentTargetObject | null) => void;
   onOpenTarget:        (targetId: string, targetType: string) => void;
-  onRefTargetChange:   (refId: string, target: ContentTargetObject | null) => void;
 }
 
 export const TargetSelectionContext = createContext<TargetSelectionContextValue | null>(null);

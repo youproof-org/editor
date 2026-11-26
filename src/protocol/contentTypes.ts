@@ -26,19 +26,8 @@ export interface ReloadModelRequest           { locale?: string; }
 export interface BeginSelectTargetRequest     { selectorId: string; allowedTypes: string[]; }
 export interface EndSelectTargetRequest       { targetId: string | null; }
 export interface OpenExternalUrlRequest                  { url: string; }
-export interface GetReferenceDisplaySuggestionsRequest  { type: string; }
-export interface GetReferenceDisplaySuggestionsResponse { suggestions: string[]; }
 export interface GetSelfReferenceDisplaySuggestionsRequest  { /* empty */ }
 export interface GetSelfReferenceDisplaySuggestionsResponse { suggestions: string[]; }
-
-export interface RefSuggestion {
-  source:  'current' | 'other';
-  name:    string;
-  display: string;
-  target:  ContentTargetObject;
-}
-export interface GetReferenceSuggestionsRequest  { currentObjectId: string; }
-export interface GetReferenceSuggestionsResponse { suggestions: RefSuggestion[]; }
 
 interface SaveObjectBase { id: string; }
 

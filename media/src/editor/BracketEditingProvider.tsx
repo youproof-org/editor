@@ -2,17 +2,16 @@ import { Dispatch, ReactNode, SetStateAction, useMemo, useRef } from 'react';
 import { BracketEditingContext } from './contexts/BracketEditingContext';
 import { useBracketLifecycle } from './hooks/useBracketLifecycle';
 import type { BracketInfo } from './contexts/BracketEditingContext';
-import type { ContentObjectData, RefSuggestion } from '../shared/types';
+import type { ContentObjectData } from '../shared/types';
 
 interface Props {
-  draft:               ContentObjectData | null;
-  setDraft:            Dispatch<SetStateAction<ContentObjectData | null>>;
-  markDirty:           () => void;
-  fetchRefSuggestions: ((query: string) => Promise<RefSuggestion[]>) | null;
-  children:            ReactNode;
+  draft:     ContentObjectData | null;
+  setDraft:  Dispatch<SetStateAction<ContentObjectData | null>>;
+  markDirty: () => void;
+  children:  ReactNode;
 }
 
-export default function BracketEditingProvider({ draft, setDraft, markDirty, fetchRefSuggestions, children }: Props) {
+export default function BracketEditingProvider({ draft, setDraft, markDirty, children }: Props) {
   const { activeItem, setActiveItem, handleBracketContentChange, handleBracketEmpty } =
     useBracketLifecycle({ setDraft, markDirty });
   const lastInsertFnRef = useRef<((info: BracketInfo) => void) | null>(null);
@@ -26,8 +25,7 @@ export default function BracketEditingProvider({ draft, setDraft, markDirty, fet
     onFieldFocused:  (fn: (info: BracketInfo) => void) => { lastInsertFnRef.current = fn; },
     insertAtFocused: (info: BracketInfo) => lastInsertFnRef.current?.(info),
     supportsTerms,
-    fetchRefSuggestions,
-  }), [activeItem, setActiveItem, handleBracketContentChange, handleBracketEmpty, supportsTerms, fetchRefSuggestions]);
+  }), [activeItem, setActiveItem, handleBracketContentChange, handleBracketEmpty, supportsTerms]);
 
   return <BracketEditingContext.Provider value={value}>{children}</BracketEditingContext.Provider>;
 }

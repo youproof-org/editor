@@ -1,8 +1,7 @@
 import { createContext, useContext } from 'react';
-import type { RefSuggestion } from '../../shared/types';
 
-export interface BracketInfo { type: 'ref' | 'term'; name: string; }
-export interface RenameEvent  { type: 'ref' | 'term'; oldName: string; newName: string; }
+export interface BracketInfo { type: 'term'; name: string; }
+export interface RenameEvent  { oldName: string; newName: string; }
 
 export interface BracketEditingContextValue {
   activeItem:             BracketInfo | null;
@@ -12,7 +11,6 @@ export interface BracketEditingContextValue {
   onFieldFocused:         (insertFn: (info: BracketInfo) => void) => void;
   insertAtFocused:        (info: BracketInfo) => void;
   supportsTerms:          boolean;
-  fetchRefSuggestions:    ((query: string) => Promise<RefSuggestion[]>) | null;
 }
 
 export const BracketEditingContext = createContext<BracketEditingContextValue | null>(null);

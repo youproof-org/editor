@@ -1,7 +1,7 @@
 import { useClient } from '../shared/clientContext';
 import { badgeChar } from './Badge';
 import EntityLabelPicker, { EntityLabelHints, type EntityLabelProps } from './EntityLabelPicker';
-import { useRefTermEditingContext } from './contexts/RefTermEditingContext';
+import { useTermEditingContext } from './contexts/TermEditingContext';
 import type { OpenContentObjectFileRequest } from '../shared/types';
 
 interface Props {
@@ -14,7 +14,7 @@ interface Props {
 
 export default function EntityHeader({ nodeId, type, title, isDirty, entityLabel }: Props) {
   const client = useClient();
-  const { onLabelChange } = useRefTermEditingContext();
+  const { onLabelChange } = useTermEditingContext();
   const badge = badgeChar(type);
   return (
     <>

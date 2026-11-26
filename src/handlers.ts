@@ -29,12 +29,7 @@ import type {
   BeginSelectTargetRequest,
   EndSelectTargetRequest,
   OpenExternalUrlRequest,
-  GetReferenceDisplaySuggestionsRequest,
-  GetReferenceDisplaySuggestionsResponse,
   GetSelfReferenceDisplaySuggestionsResponse,
-  GetReferenceSuggestionsRequest,
-  GetReferenceSuggestionsResponse,
-  RefSuggestion,
   GetContentTreeResponse,
   GetContentObjectResponse,
   ReloadModelResponse,
@@ -319,77 +314,6 @@ export function registerHandlers(ctx: HandlerContext): void {
     panelManager.setDirty(p.id, true);
     panelManager.promote(p.id);
     return {};
-  });
-
-  server.onRequest('getReferenceDisplaySuggestions', async (params): Promise<GetReferenceDisplaySuggestionsResponse> => {
-    const p = params as GetReferenceDisplaySuggestionsRequest;
-    const { idToObject } = getContent();
-    const counts = new Map<string, number>();
-    for (const v of idToObject.values()) {
-      const obj = v as Record<string, unknown>;
-      const tgt = obj['target'] as Record<string, unknown> | undefined;
-      if (!tgt || tgt['type'] !== p.type) continue;
-      const parent = obj['parent'] as Record<string, unknown> | undefined;
-      if (!parent) continue;
-      const parentRefs = Array.isArray(parent['references']) ? parent['references'] as unknown[] : [];
-      if (!parentRefs.includes(obj)) continue;
-      const display = obj['display'] as string | undefined;
-      if (display) counts.set(display, (counts.get(display) ?? 0) + 1);
-    }
-    const suggestions = [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([s]) => s);
-    return { suggestions };
-  });
-
-  server.onRequest('getReferenceSuggestions', async (params): Promise<GetReferenceSuggestionsResponse> => {
-    const { currentObjectId } = params as GetReferenceSuggestionsRequest;
-    const { idToObject } = getContent();
-
-    // Walk parent chain looking for an ancestor whose id matches currentObjectId.
-    const belongsToCurrent = (parent: unknown): boolean => {
-      let cursor: unknown = parent;
-      while (cursor && typeof cursor === 'object') {
-        const id = (cursor as { id?: unknown }).id;
-        if (id === currentObjectId) return true;
-        cursor = (cursor as { parent?: unknown }).parent;
-      }
-      return false;
-    };
-
-    const suggestions: RefSuggestion[] = [];
-
-    for (const v of idToObject.values()) {
-      const obj = v as Record<string, unknown>;
-      const tgt = obj['target'] as { type?: string; target?: string } | undefined;
-      const parent = obj['parent'];
-      if (!tgt || !parent) continue;
-      const parentRefs = Array.isArray((parent as { references?: unknown[] }).references)
-        ? (parent as { references: unknown[] }).references
-        : [];
-      if (!parentRefs.includes(obj)) continue;        // only Reference entities
-      const display = obj['display'] as string | undefined;
-      if (!display) continue;                          // filter: must have a display
-      const targetType = tgt.type;
-      const targetId   = tgt.target;
-      if (!targetType || !targetId) continue;
-      let label: string | undefined;
-      if (targetType === 'external') {
-        label = targetId;
-      } else {
-        const resolved = idToObject.get(targetId) as { title?: string; name?: string } | undefined;
-        label = resolved?.title ?? resolved?.name;
-      }
-      if (!label) continue;                            // filter: must have a resolved target
-
-      suggestions.push({
-        source:  belongsToCurrent(parent) ? 'current' : 'other',
-        name:    obj['name'] as string,
-        display,
-        target:  { id: targetId, type: targetType, label },
-      });
-    }
-    return { suggestions };
   });
 
   server.onRequest('getSelfReferenceDisplaySuggestions', async (): Promise<GetSelfReferenceDisplaySuggestionsResponse> => {

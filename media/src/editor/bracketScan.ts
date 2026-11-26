@@ -12,22 +12,14 @@ export function getAllBlocksText(d: ContentObjectData): string {
   return '';
 }
 
-export function countSegments(text: string, name: string, type: 'ref' | 'term'): number {
-  const re = type === 'ref'
-    ? new RegExp(`(?<!\\[)\\[${name}\\](?!\\])`, 'g')
-    : new RegExp(`\\[\\[${name}\\]\\]`, 'g');
-  return (maskFormulas(text).match(re) ?? []).length;
+export function countTermSegments(text: string, name: string): number {
+  return (maskFormulas(text).match(new RegExp(`\\[\\[${name}\\]\\]`, 'g')) ?? []).length;
 }
 
-export function sortByOccurrence<T extends { name: string }>(
-  items: T[], text: string, type: 'ref' | 'term',
-): T[] {
+export function sortByOccurrence<T extends { name: string }>(items: T[], text: string): T[] {
   const masked = maskFormulas(text);
   const pos = (name: string): number => {
-    const re = type === 'ref'
-      ? new RegExp(`(?<!\\[)\\[${name}\\](?!\\])`)
-      : new RegExp(`\\[\\[${name}\\]\\]`);
-    const m = re.exec(masked);
+    const m = new RegExp(`\\[\\[${name}\\]\\]`).exec(masked);
     return m !== null ? m.index : Infinity;
   };
   return [...items].sort((a, b) => pos(a.name) - pos(b.name));
