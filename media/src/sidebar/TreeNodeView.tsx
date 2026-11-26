@@ -13,7 +13,6 @@ const BADGE: Record<string, string | null> = {
   theorem:    'T',
   proof:      'P',
   remark:     'R',
-  reference:  '→',
   term:       '★',
   claim:      '§',
 };

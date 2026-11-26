@@ -276,13 +276,11 @@ test('reference problems in a loaded file are read with the templates', () => {
   assert.deepEqual(unchecked.idToObject.get(unchecked.filePathToId.get(file)).references.problems, [], 'without templates nothing is checked')
 })
 
-test('the content tree lists the references the text holds now, in reading order', () => {
+test('the content tree has no items for the references the text holds', () => {
   const fx = fixture()
-  editThroughPanel(fx, fx.section, 'body', (wire) => { wire.reverse() })
   const chapter = buildContentTree(fx.content).books[0].children[0].children[0]
-  const section = chapter.children.find((item) => item.id === fx.section.id)
-  assert.deepEqual(section.children.map((item) => item.label),
-    ['[0] [d]', '[1] chapters', '[2] modulo $n$ [e]', '[3] [c]', '[4] [a]', '[5] index-label'])
-  assert.ok(section.children.every((item, i) => item.id === `${fx.section.id}:reference:${i}`))
-  assert.deepEqual(chapter.children[0].children.map((item) => item.label), ['[0] [fejezet-ref]'])
+  assert.equal(chapter.id, fx.chapter.id)
+  assert.deepEqual(chapter.children, [
+    { id: fx.section.id, type: 'section', label: 'Szakasz', isFileBacked: true, children: [] },
+  ])
 })

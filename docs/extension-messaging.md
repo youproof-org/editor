@@ -59,9 +59,9 @@ interface ContentTreeData {
 
 interface ContentTreeItem {
   id:          string;
-  type:        NodeType | 'group' | 'reference' | 'term' | 'claim';
+  type:        NodeType | 'group' | 'term' | 'claim';
   label:       string;
-  isFileBacked: boolean;           // false for inline items (terms, refs, claims, groups)
+  isFileBacked: boolean;           // false for inline items (terms, claims, groups)
   children:    ContentTreeItem[];
 }
 ```

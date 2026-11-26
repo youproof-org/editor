@@ -13,9 +13,8 @@ import {
 import { fileReferenceTexts, readReferences, type DisplayTemplateCollection } from '@youproof.org/display-templates';
 import { normalizeStrings } from './content/normalize';
 import {
-  describeSavedReferenceProblems, heldReferences, numberReferences, referenceFileKind, referencesSectionFor,
+  describeSavedReferenceProblems, numberReferences, referenceFileKind, referencesSectionFor,
 } from './content/references';
-import { referenceTokenLabel } from './protocol/referenceToken';
 import type { ReferenceResolution } from './content/numbering';
 import { resolveReferenceTokens } from './content/referenceDisplays';
 import { getLocales } from './content/locales';
@@ -410,13 +409,7 @@ export function registerHandlers(ctx: HandlerContext): void {
 
 // ─── Content navigation helpers ───────────────────────────────────────────────
 
-// A reference has no object of its own, so its tree item is named by its owner and position.
-const REFERENCE_TREE_ID = ':reference:';
-const referenceTreeId = (ownerId: string, index: number): string => `${ownerId}${REFERENCE_TREE_ID}${index}`;
-
 function findFileBacked(id: string, content: LoadedContent): string | null {
-  const owner = id.includes(REFERENCE_TREE_ID) ? id.slice(0, id.indexOf(REFERENCE_TREE_ID)) : null;
-  if (owner && content.idToFilePath.has(owner)) return owner;
   let cur = content.idToObject.get(id) as { parent?: { id: string } } | undefined;
   for (let i = 0; i < 10 && cur?.parent; i++) {
     const parentId = cur.parent.id;
@@ -1144,19 +1137,6 @@ function buildTargetObjects(blocks: unknown[], content: LoadedContent): Record<s
 // ─── Content tree builder ─────────────────────────────────────────────────────
 
 export function buildContentTree(content: LoadedContent): Pick<GetContentTreeResponse, 'books' | 'kb'> {
-  function group(id: string, label: string, children: ContentTreeItem[]): ContentTreeItem {
-    return { id, type: 'group', label, isFileBacked: false, children };
-  }
-
-  function refItems(owner: { id: string }): ContentTreeItem[] {
-    return heldReferences(owner as unknown as Record<string, unknown>).map((item, index) => ({
-      id: referenceTreeId(owner.id, index), type: 'reference' as const,
-      label: `[${index}] ${referenceTokenLabel(item)}`,
-      isFileBacked: false,
-      children: [],
-    }));
-  }
-
   function termItems(terms: Array<{ id: string; name: string; canonical: string }>): ContentTreeItem[] {
     return terms.map(t => ({ id: t.id, type: 'term' as const, label: `${t.name}`, isFileBacked: false, children: [] }));
   }
@@ -1171,7 +1151,7 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     const anyEntity = entity as unknown as Record<string, unknown>;
     const terms  = Array.isArray(anyEntity['terms']) ? anyEntity['terms'] as Array<{ id: string; name: string; canonical: string }> : [];
     const body   = entity.body as unknown as Array<Record<string, unknown>>;
-    return [...termItems(terms), ...claimItems(body), ...refItems(entity)];
+    return [...termItems(terms), ...claimItems(body)];
   }
 
   function entityToTree(entity: Definition | Theorem | Proof | Remark): ContentTreeItem {
@@ -1217,17 +1197,13 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     id: book.id, type: 'book', label: book.title, isFileBacked: book.filePath !== null,
     children: book.parts.map(part => ({
       id: part.id, type: 'part', label: part.title, isFileBacked: part.filePath !== null,
-      children: part.chapters.map(chapter => {
-        const chapterReferences = refItems(chapter);
-        const chChildren: ContentTreeItem[] = [
-          ...(chapterReferences.length ? [group(`${chapter.id}:_refs`, 'References', chapterReferences)] : []),
-          ...chapter.sections.map(section => ({
-            id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
-            children: refItems(section),
-          })),
-        ];
-        return { id: chapter.id, type: 'chapter', label: chapter.title, isFileBacked: chapter.filePath !== null, children: chChildren };
-      }),
+      children: part.chapters.map(chapter => ({
+        id: chapter.id, type: 'chapter', label: chapter.title, isFileBacked: chapter.filePath !== null,
+        children: chapter.sections.map(section => ({
+          id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
+          children: [],
+        })),
+      })),
     })),
   }));
 

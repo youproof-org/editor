@@ -7,7 +7,7 @@ export type NodeType =
 
 export interface ContentTreeItem {
   id: string;
-  type: NodeType | 'group' | 'reference' | 'term' | 'claim';
+  type: NodeType | 'group' | 'term' | 'claim';
   label: string;
   isFileBacked: boolean;
   children: ContentTreeItem[];
