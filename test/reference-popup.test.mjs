@@ -1,6 +1,7 @@
 // The reference popup's logic, apart from React and the DOM: the search over the
 // catalogue, the templates it offers for the targets, the draft's problems in the
-// words of the site build's reader, the item a confirm writes, and Text mode.
+// words of the site build's reader, the item a confirm writes, Text mode, and
+// where the popup goes so that it never covers what it belongs to.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -193,4 +194,50 @@ test('on the real content, prím, prímsz and 24.16 find what authors cite', { s
   assert.deepEqual([first('24.16').target.kind, first('24.16').target.label], ['theorem', '24.16. Tétel'])
   const theorem = draftTarget(first('24.16').target.path, choicesByPath(choices))
   assert.equal(candidateTemplates(choices.templates, [theorem])[0].name, 'the-index-label')
+})
+
+const { placeReferencePopup, anchorInPane } = require('../out/test/webview.js')
+const PANE = { top: 0, bottom: 600, left: 0, right: 400 }
+const rect = (top, left, width = 80, height = 18) => ({ top, bottom: top + height, left, right: left + width })
+const covers = (placed, size, r) => placed.top < r.bottom && placed.top + (placed.maxHeight ?? size.height) > r.top
+
+test('the popup opens below its anchor, left-aligned, and flips above when there is no room below', () => {
+  const size = { width: 300, height: 200 }
+  assert.deepEqual(placeReferencePopup([rect(100, 40)], size, PANE), { top: 120, left: 40, side: 'below' })
+  const low = rect(500, 40)
+  assert.deepEqual(placeReferencePopup([low], size, PANE), { top: 298, left: 40, side: 'above' })
+  assert.ok(!covers(placeReferencePopup([low], size, PANE), size, low))
+})
+
+test('when neither side fits it takes the larger one and scrolls inside', () => {
+  const size = { width: 300, height: 500 }
+  const placed = placeReferencePopup([rect(400, 40)], size, PANE)
+  assert.deepEqual(placed, { top: 8, left: 40, side: 'above', maxHeight: 390 })
+  const high = placeReferencePopup([rect(150, 40)], size, PANE)
+  assert.deepEqual(high, { top: 170, left: 40, side: 'below', maxHeight: 422 })
+})
+
+test('it shifts sideways to stay in the pane, at either edge, and narrows in a pane narrower than it', () => {
+  const size = { width: 300, height: 100 }
+  assert.equal(placeReferencePopup([rect(100, 350, 40)], size, PANE).left, 92, 'clamped to the right edge')
+  assert.equal(placeReferencePopup([rect(100, -30)], size, PANE).left, 8, 'clamped to the left edge')
+  const pane = { top: 0, bottom: 600, left: 100, right: 300 }
+  assert.deepEqual(placeReferencePopup([rect(100, 150)], size, pane), { top: 120, left: 108, side: 'below', maxWidth: 184 })
+})
+
+test('a token wrapped over two lines is anchored by the union of its line boxes, and neither line is covered', () => {
+  const size = { width: 300, height: 200 }
+  const lines = [rect(400, 300, 100), rect(418, 0, 60)]
+  const placed = placeReferencePopup(lines, size, PANE)
+  assert.deepEqual(placed, { top: 198, left: 8, side: 'above' })
+  for (const line of lines) assert.ok(!covers(placed, size, line))
+  const below = placeReferencePopup([rect(50, 300, 100), rect(68, 0, 60)], size, PANE)
+  assert.equal(below.top, 88, 'below the second line')
+})
+
+test('an anchor scrolled out of the pane closes the popup', () => {
+  assert.equal(anchorInPane([rect(100, 40)], PANE), true)
+  assert.equal(anchorInPane([rect(-40, 40)], PANE), false)
+  assert.equal(anchorInPane([rect(-10, 40)], PANE), true, 'partly visible')
+  assert.equal(anchorInPane([], PANE), false)
 })

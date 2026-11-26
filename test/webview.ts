@@ -6,3 +6,4 @@ export { history, redo, undo } from '@codemirror/commands';
 export { encodeReferenceToken, findReferenceTokens } from '../src/protocol/referenceToken';
 export { referencePlacements } from '../src/protocol/referencePlacement';
 export * from '../media/src/editor/referencePopupModel';
+export * from '../media/src/editor/referencePopupPlacement';
