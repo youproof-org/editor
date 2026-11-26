@@ -6,6 +6,8 @@ export interface TargetSelectionContextValue {
   selectingSelectorId: string | null;
   onBeginSelectTarget: (selectorId: string, allowedTypes: string[]) => void;
   onEndSelectTarget:   (result: ContentTargetObject | null) => void;
+  /** Routes the result of the picks `selectorId` starts to `listener` instead of an embed block; returns the undo. */
+  onTargetSelected:    (selectorId: string, listener: (result: ContentTargetObject | null) => void) => () => void;
   onOpenTarget:        (targetId: string, targetType: string) => void;
 }
 

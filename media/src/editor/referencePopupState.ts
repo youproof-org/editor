@@ -4,7 +4,7 @@ import {
 import { isolateHistory } from '@codemirror/commands';
 import type { EditorView } from '@codemirror/view';
 import { encodeReferenceToken, findReferenceTokens } from '../shared/referenceToken';
-import { referencePlacements } from '../shared/referencePlacement';
+import { referencePlacements, type ReferencePlacement } from '../shared/referencePlacement';
 
 /** The part of a field a reference popup is about: the caret or selection it creates at, or the token it edits. */
 export interface ReferencePopupRange {
@@ -75,6 +75,12 @@ function isInsideTermMarker(doc: string, pos: number): boolean {
 
 const PROBE = '[@x]';
 
+/** Where the site would put a reference that replaced `from`..`to`: whether it reads it, and whether it starts a sentence. */
+export function probePlacement(doc: string, from: number, to: number): ReferencePlacement | undefined {
+  const before = doc.slice(0, from);
+  return referencePlacements(before + PROBE + doc.slice(to))[findReferenceTokens(before).length];
+}
+
 /** What `[` typed over the range would open: the create popup's range and its search query. */
 export interface ReferenceTrigger {
   from: number;
@@ -99,9 +105,7 @@ export function referenceTriggerAt(
   const from = usesSelection ? selection.from + (selected.length - selected.trimStart().length) : selection.head;
   const to = usesSelection ? selection.to - (selected.length - selected.trimEnd().length) : selection.head;
   if (isInsideFormula(doc, from) || isInsideTermMarker(doc, from)) return null;
-  const before = doc.slice(0, from);
-  const placement = referencePlacements(before + PROBE + doc.slice(to))[findReferenceTokens(before).length];
-  if (!placement?.read) return null;
+  if (!probePlacement(doc, from, to)?.read) return null;
   return { from, to, query: usesSelection ? selected.trim() : '' };
 }
 

@@ -9,6 +9,7 @@ import BlockOpsProvider from './BlockOpsProvider';
 import BracketEditingProvider from './BracketEditingProvider';
 import TargetSelectionProvider from './TargetSelectionProvider';
 import TermEditingProvider from './TermEditingProvider';
+import ReferencePopupProvider from './ReferencePopupProvider';
 import EntityHeader from './EntityHeader';
 import EntityBody from './EntityBody';
 import EditorTabs from './EditorTabs';
@@ -53,6 +54,7 @@ export default function NodeView({ nodeId }: Props) {
     <BracketEditingProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
     <TargetSelectionProvider setDraft={setDraft} setTargetObjects={setTargetObjects} markDirty={markDirty} targetObjects={targetObjects}>
     <BlockOpsProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
+    <ReferencePopupProvider nodeId={nodeId}>
       <div className="node-view">
         <div className="node-view-content">
           <EntityHeader
@@ -73,6 +75,7 @@ export default function NodeView({ nodeId }: Props) {
           onSelect={handleSelectId}
         />
       </div>
+    </ReferencePopupProvider>
     </BlockOpsProvider>
     </TargetSelectionProvider>
     </BracketEditingProvider>

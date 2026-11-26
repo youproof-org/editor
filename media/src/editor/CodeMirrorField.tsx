@@ -106,6 +106,16 @@ const vsCodeTheme = EditorView.theme({
     textDecoration: 'wavy underline',
     textDecorationColor: 'var(--vscode-editorError-foreground, #f14c4c)',
   },
+  '.cm-yp-ref-active': {
+    background: 'var(--vscode-editor-findMatchHighlightBackground, rgba(155, 114, 208, 0.25))',
+    outline: '1px solid var(--vscode-editor-findMatchBorder, #9b72d0)',
+    borderRadius: '2px',
+  },
+  '.cm-yp-ref-ghost': {
+    opacity: '0.75',
+    outline: '1px dashed #9b72d0',
+    borderRadius: '2px',
+  },
 });
 
 function escapeRegex(s: string): string {

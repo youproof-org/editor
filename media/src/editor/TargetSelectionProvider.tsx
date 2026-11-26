@@ -18,6 +18,7 @@ export default function TargetSelectionProvider({
     selectingSelectorId,
     handleBeginSelectTarget,
     handleEndSelectTarget,
+    handleTargetSelected,
     handleOpenTarget,
   } = useTargetSelection({ setDraft, setTargetObjects, markDirty });
 
@@ -26,8 +27,9 @@ export default function TargetSelectionProvider({
     selectingSelectorId,
     onBeginSelectTarget: handleBeginSelectTarget,
     onEndSelectTarget:   handleEndSelectTarget,
+    onTargetSelected:    handleTargetSelected,
     onOpenTarget:        handleOpenTarget,
-  }), [targetObjects, selectingSelectorId, handleBeginSelectTarget, handleEndSelectTarget, handleOpenTarget]);
+  }), [targetObjects, selectingSelectorId, handleBeginSelectTarget, handleEndSelectTarget, handleTargetSelected, handleOpenTarget]);
 
   return <TargetSelectionContext.Provider value={value}>{children}</TargetSelectionContext.Provider>;
 }

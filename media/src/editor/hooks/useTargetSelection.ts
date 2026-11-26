@@ -23,6 +23,7 @@ export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Pa
   // `targetSelectionEnded` is broadcast to all panels, so without this gate
   // every panel would call markDirty() on every successful selection.
   const initiatedByThisPanelRef = useRef(false);
+  const resultListenersRef = useRef(new Map<string, (result: ContentTargetObject | null) => void>());
 
   const handleBlockTargetChange = useCallback((blockId: string, target: ContentTargetObject | null) => {
     const updateBlock = (b: ContentBlock): ContentBlock => {
@@ -60,7 +61,9 @@ export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Pa
       setSelectingSelectorId(null);
       if (!initiatedByThisPanelRef.current) return;
       initiatedByThisPanelRef.current = false;
-      if (result) handleBlockTargetChange(selectorId, result);
+      const listener = resultListenersRef.current.get(selectorId);
+      if (listener) listener(result);
+      else if (result) handleBlockTargetChange(selectorId, result);
     });
   }, []);
 
@@ -71,6 +74,13 @@ export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Pa
 
   const handleEndSelectTarget = useCallback((result: ContentTargetObject | null) => {
     client.request('endSelectTarget', { targetId: result?.id ?? null } as EndSelectTargetRequest).catch(console.error);
+  }, []);
+
+  const handleTargetSelected = useCallback((selectorId: string, listener: (result: ContentTargetObject | null) => void) => {
+    resultListenersRef.current.set(selectorId, listener);
+    return () => {
+      if (resultListenersRef.current.get(selectorId) === listener) resultListenersRef.current.delete(selectorId);
+    };
   }, []);
 
   const handleOpenTarget = useCallback((targetId: string, targetType: string) => {
@@ -85,6 +95,7 @@ export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Pa
     selectingSelectorId,
     handleBeginSelectTarget,
     handleEndSelectTarget,
+    handleTargetSelected,
     handleOpenTarget,
   };
 }

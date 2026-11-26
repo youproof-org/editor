@@ -175,7 +175,7 @@ A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a t
 ### `resolveReferenceTokens`
 
 **Direction:** editor panel → extension host  
-**Caller:** `ReferenceDisplayStore` (`media/src/editor/referenceDisplays.ts`), for the tokens its fields show that it has no display for yet, batched per turn, and for all of them again on a `referenceDisplaysChanged` notification  
+**Caller:** `ReferenceDisplayStore` (`media/src/editor/referenceDisplays.ts`), for the tokens its fields show and the previews the reference popup shows that it has no display for yet, batched per turn, and for all of them again on a `referenceDisplaysChanged` notification  
 **Params:** `{ id: string; payloads: string[] }`: the panel's content object, and the payloads of the tokens to render (the part of `[@<payload>]` between `[@` and `]`)  
 **Result:** `{ displays: Record<string, ReferenceTokenDisplay> }`, one entry per payload
 
@@ -300,7 +300,7 @@ Marks the panel tab dirty (prepends `●` to the title) and promotes it out of p
 ### `getReferenceChoices`
 
 **Direction:** editor panel → extension host  
-**Caller:** none yet in the webview; the reference popup is what it is for  
+**Caller:** `ReferencePopupProvider.tsx` (editor panels), when the panel's reference popup opens for the first time, and again when it opens or is open after a `referenceDisplaysChanged` notification  
 **Params:** `{ id: string }`: the panel's content object  
 **Result:** `ReferenceChoices`
 
@@ -355,7 +355,7 @@ The host opens the URL with `vscode.env.openExternal`.
 ### `beginSelectTarget`
 
 **Direction:** editor panel → extension host  
-**Caller:** `useTargetSelection.ts` (`handleBeginSelectTarget`), when an embed block's target selector starts a pick in the sidebar  
+**Caller:** `useTargetSelection.ts` (`handleBeginSelectTarget`), when an embed block's target selector, or the reference popup's "Pick in sidebar", starts a pick in the sidebar  
 **Params:** `{ selectorId: string; allowedTypes: string[] }`: who started the pick, and the tree node types that can be picked  
 **Result:** `{}`
 
@@ -366,7 +366,7 @@ The host remembers the pick and broadcasts `targetSelectionStarted` with the sam
 ### `endSelectTarget`
 
 **Direction:** sidebar or editor panel → extension host  
-**Caller:** `App.tsx` (sidebar), with the node's id when its Select button is clicked and with `null` from "Cancel select target"; `useTargetSelection.ts` (`handleEndSelectTarget`), with `null` from an embed block's Cancel  
+**Caller:** `App.tsx` (sidebar), with the node's id when its Select button is clicked and with `null` from "Cancel select target"; `useTargetSelection.ts` (`handleEndSelectTarget`), with `null` from an embed block's Cancel and from the reference popup's Cancel, Escape or closing  
 **Params:** `{ targetId: string | null }`  
 **Result:** `{}`
 
@@ -429,7 +429,7 @@ Notifications flow from the extension host to all registered webviews. The clien
 **Params:** `{ selectorId: string; result: ContentTargetObject | null }`  
 **Subscribers:**
 - `App.tsx` (sidebar), which leaves the selection mode
-- `useTargetSelection.ts` (editor panels), which clears the picking selector. Only the panel that sent `beginSelectTarget` acts on `result`: it sets the embed block whose id is `selectorId` to the picked target and marks the panel dirty.
+- `useTargetSelection.ts` (editor panels), which clears the picking selector. Only the panel that sent `beginSelectTarget` acts on `result`. For the reference popup's `selectorId`, `reference-popup`, it hands `result`, `null` included, to the popup, which goes on with the picked target's `path`. For any other, it sets the embed block whose id is `selectorId` to the picked target and marks the panel dirty.
 
 ---
 
