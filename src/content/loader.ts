@@ -10,7 +10,7 @@ import type {
   SubsectionBlock, DetailsBlock, EmbedBlock,
   EntityLabelFields,
 } from './model';
-import { isExternalTarget, parseFqn, type FqnKind } from './fqn';
+import { isExternalTarget, parseFqn, type FqnStep, type RefTargetKind } from '@youproof.org/content-model';
 import { normalizeStrings } from './normalize';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
@@ -607,7 +607,7 @@ function resolveTarget(
   const target = raw.trim();
   if (isExternalTarget(target)) return { type: 'external', target };
 
-  const steps = parseFqn(target);
+  const steps = fqnSteps(target);
   if (!steps) return { type: 'unresolved', target: '', fqn: target };
 
   const unresolved: RefTarget = { type: 'unresolved', target: '', fqn: target };
@@ -645,10 +645,23 @@ function resolveTarget(
   return unresolved;
 }
 
+/**
+ * The steps of a well-formed path that the content model allows, or null. A path
+ * the grammar rejects, such as a claim under a proof, stays `unresolved` with its
+ * text kept, so the editor writes it back as authored and the site build reports it.
+ */
+function fqnSteps(target: string): readonly FqnStep[] | null {
+  try {
+    return parseFqn(target, 'reference target').steps;
+  } catch {
+    return null;
+  }
+}
+
 /** One step down from `node` into its `kind` children, by name. */
 function childOf(
   node: Record<string, unknown> | undefined,
-  kind: FqnKind,
+  kind: RefTargetKind,
   name: string,
 ): Record<string, unknown> | undefined {
   if (!node) return undefined;

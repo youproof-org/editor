@@ -5,7 +5,10 @@ import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
 import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
-import { buildFqn, isExternalTarget, IDENTIFIER_RE, type FqnKind, type FqnStep } from './content/fqn';
+import {
+  fqnJoin, isExternalTarget, KEBAB_CASE, KB_ENTITY_TYPES as LABELLED_ENTITY_TYPES,
+  type EntityLabelRegistry, type FqnStep, type RefTargetKind,
+} from '@youproof.org/content-model';
 import { normalizeStrings } from './content/normalize';
 import { getLocales } from './content/locales';
 import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
@@ -15,6 +18,7 @@ import type {
   ContentTerm,
   ContentReference,
   KbEntityType,
+  EntityTypeLabels,
   GetContentObjectRequest,
   SelectContentObjectRequest,
   SaveContentObjectRequest,
@@ -501,11 +505,11 @@ function targetToYaml(
   const obj = content.idToObject.get(id) as Record<string, unknown> | undefined;
   if (!obj) return fqn || undefined;
 
-  const steps = stepsForObject(obj, type as FqnKind, content);
-  return steps ? buildFqn(steps) : (fqn || undefined);
+  const steps = stepsForObject(obj, type as RefTargetKind, content);
+  return steps ? steps.reduce((joined, step) => fqnJoin(joined, step.kind, step.name), '') : (fqn || undefined);
 }
 
-// The types a remark can hang off, per the FQN grammar (see fqn.ts).
+// The types a remark can hang off, per the FQN grammar (see fqn.ts in @youproof.org/content-model).
 const REMARK_OWNER_TYPES = ['definition', 'theorem', 'proof'];
 
 /**
@@ -518,7 +522,7 @@ const REMARK_OWNER_TYPES = ['definition', 'theorem', 'proof'];
  */
 function stepsForObject(
   obj: Record<string, unknown>,
-  kind: FqnKind,
+  kind: RefTargetKind,
   content: LoadedContent,
 ): FqnStep[] | null {
   const name = obj['name'];
@@ -547,7 +551,7 @@ function stepsForObject(
         REMARK_OWNER_TYPES.includes(o['type'] as string) &&
         ((o['remarks'] as Record<string, unknown>[] | undefined)?.some((r) => r['id'] === obj['id']) ?? false));
       if (!owner) return null;
-      const ownerKind = owner['type'] as FqnKind;
+      const ownerKind = owner['type'] as RefTargetKind;
       const parent = stepsForObject(owner, ownerKind, content);
       return parent ? [...parent, self] : null;
     }
@@ -560,13 +564,13 @@ function stepsForObject(
             `details are not supported.`,
         );
       }
-      const parent = stepsForObject(parentObj, parentObj['type'] as FqnKind, content);
+      const parent = stepsForObject(parentObj, parentObj['type'] as RefTargetKind, content);
       return parent ? [...parent, self] : null;
     }
     case 'chapter': {
       const part = obj['part'] as { name: string; book: { name: string } } | undefined;
       if (!part?.book?.name) return null;
-      // No part step: a chapter is addressed under its book (see fqn.ts).
+      // No part step: a chapter is addressed under its book (see fqn.ts in @youproof.org/content-model).
       return [{ kind: 'book', name: part.book.name }, self];
     }
     case 'section': {
@@ -610,7 +614,7 @@ function findOwner(
 // destroy such a block.
 const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
 
-const KB_ENTITY_TYPES: string[] = ['definition', 'theorem', 'proof', 'remark'];
+const KB_ENTITY_TYPES: readonly string[] = LABELLED_ENTITY_TYPES;
 
 function showingServicesErrors<T>(fn: () => T): T {
   try {
@@ -621,10 +625,20 @@ function showingServicesErrors<T>(fn: () => T): T {
   }
 }
 
+function labelVariantsFor(registry: EntityLabelRegistry | null, locale: string, type: string): EntityTypeLabels | undefined {
+  if (!registry || !Object.prototype.hasOwnProperty.call(registry, locale)) return undefined;
+  if (!KB_ENTITY_TYPES.includes(type)) return undefined;
+  const labels = registry[locale][type as KbEntityType];
+  return {
+    default: labels.default,
+    variants: Object.entries(labels.variants).map(([key, variant]) => ({ key, canonical: variant.canonical })),
+  };
+}
+
 // Exported for test/services-data.test.mjs. Not part of the extension's public surface.
 export function entityLabelFields(obj: Record<string, unknown>, services: ServicesData): Record<string, unknown> {
   const locale = obj['locale'] as string;
-  const labelVariants = services.entityLabels?.[locale]?.[obj['type'] as KbEntityType];
+  const labelVariants = labelVariantsFor(services.entityLabels, locale, obj['type'] as string);
   return {
     locale,
     ...(typeof obj['label'] === 'string' ? { label: obj['label'] } : {}),
@@ -809,7 +823,7 @@ function assertSlugsAreSound(obj: WireBlock, type: string): void {
   const badShape = (kind: string, id: string, slug: string): never => {
     throw new Error(
       `The ${kind} "${id}" has slug ${JSON.stringify(slug)}, which is not a valid identifier: ` +
-        `it must be lowercase kebab-case (${IDENTIFIER_RE.source}). A slug is a segment of the ` +
+        `it must be lowercase kebab-case (${KEBAB_CASE.source}). A slug is a segment of the ` +
         `anchor path that cites it, so it cannot contain a '.', a space or a capital.`,
     );
   };
@@ -841,7 +855,7 @@ function assertSlugsAreSound(obj: WireBlock, type: string): void {
 
   const claimAnchors = new Map<string, string>();
   for (const c of claims) {
-    if (c.slug && !IDENTIFIER_RE.test(c.slug)) badShape('claim', c.name, c.slug);
+    if (c.slug && !KEBAB_CASE.test(c.slug)) badShape('claim', c.name, c.slug);
     const anchor = c.slug || c.name;
     const prior = claimAnchors.get(anchor);
     if (prior !== undefined && prior !== c.name) collide('claim', prior, c.name, anchor);
@@ -853,7 +867,7 @@ function assertSlugsAreSound(obj: WireBlock, type: string): void {
   for (const t of (Array.isArray(obj['terms']) ? obj['terms'] as WireBlock[] : [])) {
     const name = String(t['name'] ?? '');
     const slug = String(t['slug'] ?? '');
-    if (slug && !IDENTIFIER_RE.test(slug)) badShape('term', name, slug);
+    if (slug && !KEBAB_CASE.test(slug)) badShape('term', name, slug);
     const anchor = slug || name;
     const prior = termAnchors.get(anchor);
     if (prior !== undefined && prior !== name) collide('term', prior, name, anchor);
@@ -900,10 +914,10 @@ function blockToYaml(
       // reference to it is `...claims.{name}` — so a `.` or a space would make that
       // reference unparseable, and the site build would reject it far from here.
       const claimName = wire['name'];
-      if (typeof claimName !== 'string' || !IDENTIFIER_RE.test(claimName)) {
+      if (typeof claimName !== 'string' || !KEBAB_CASE.test(claimName)) {
         throw new Error(
           `Claim name ${JSON.stringify(claimName)} is not a valid identifier: it must be ` +
-            `lowercase kebab-case (${IDENTIFIER_RE.source}). A claim name is part of the ` +
+            `lowercase kebab-case (${KEBAB_CASE.source}). A claim name is part of the ` +
             `path that references it, so it cannot contain a '.', a space or a capital.`,
         );
       }

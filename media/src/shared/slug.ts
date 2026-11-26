@@ -1,18 +1,13 @@
+import { KEBAB_CASE } from '@youproof.org/content-model';
+
 /**
  * Slug helpers for the two slugs the editor owns: a `claim` block's and a `terms`
  * entry's. Both are the localized half of an in-page anchor, so both are Hungarian
  * while their `name` / map key stays English.
  */
 
-/**
- * Mirrors IDENTIFIER_RE in `src/content/fqn.ts` (and the services repo's
- * `lib/content/fqn.ts`, which is authoritative). Duplicated rather than imported
- * because the webview bundle must not reach into the extension host's sources.
- */
-export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
 export function isValidSlug(slug: string): boolean {
-  return SLUG_RE.test(slug);
+  return KEBAB_CASE.test(slug);
 }
 
 const ACCENTS: Record<string, string> = {

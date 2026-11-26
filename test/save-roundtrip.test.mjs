@@ -516,6 +516,22 @@ test('a target this editor cannot model survives a save', () => {
   assert.equal(refs['a-book'].target, 'books.konyv', 'a book reference must not be dropped')
 })
 
+test('a path the content model forbids is kept as authored, not resolved', () => {
+  // Well formed, but a proof holds no numbered claims. The shared grammar rejects
+  // it, so it stays unresolved and is written back verbatim for the build to report.
+  const root = fixture()
+  const illegal = 'theorems.proba-tetel.proofs.proba-bizonyitas.claims.proof-claim'
+  const chapterFile = path.join(root, 'books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
+  writeFileSync(chapterFile, readFileSync(chapterFile, 'utf8')
+    .replace('    target: books.konyv\n', `    target: books.konyv\n  a-proof-claim:\n    display: "[állítás]"\n    target: ${illegal}\n`)
+    .replace('[a-mail].', '[a-mail], [a-proof-claim].'))
+  const content = loadContent(root, 'hu')
+  const chapter = [...content.idToObject.values()].find((o) => o.type === 'chapter')
+  const ref = chapter.references.find((r) => r.name === 'a-proof-claim')
+  assert.deepEqual(ref.target, { type: 'unresolved', target: '', fqn: illegal })
+  assert.equal(chapterDoc(saveAll(root)).references['a-proof-claim'].target, illegal)
+})
+
 test('a reference target is never silently dropped', () => {
   const root = fixture()
   const refs = chapterDoc(saveAll(root)).references

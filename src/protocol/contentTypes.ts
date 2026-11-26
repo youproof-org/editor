@@ -108,7 +108,7 @@ export interface ContentReference { id: string; name: string; display: string; t
 // ─── Content object data (discriminated by type) ──────────────────────────────
 
 interface ContentObjectBase { id: string; name: string; title?: string; selectedId: string | null; }
-export type KbEntityType = 'definition' | 'theorem' | 'proof' | 'remark';
+export type { KbEntityType } from '@youproof.org/content-model';
 export interface EntityLabelVariant { key: string; canonical: string; }
 export interface EntityTypeLabels   { default: string; variants: EntityLabelVariant[]; }
 
