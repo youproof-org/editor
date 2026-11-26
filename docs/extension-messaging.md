@@ -79,7 +79,7 @@ The extension host:
 1. Resolves the file-backed entity: if `id` is not in `idToFilePath`, walks the parent chain via `findFileBacked()` to find the nearest file-backed ancestor.
 2. Opens or reveals the editor panel via `PanelManager.open()`. New panels always open as native VS Code preview tabs (italic tab title, `Tab.isPreview = true`). If there is already a different preview panel open, it is closed first.
 3. If `permanent` is `true`, immediately calls `PanelManager.promote()` to pin the tab (non-italic).
-4. If `id` differs from the current `selectedId`: stores `selectedId = id` and broadcasts a `refresh` notification to all webviews.
+4. If `id` differs from the current `selectedId`: stores `selectedId = id` and broadcasts a `contentObjectSelected` notification with the `id` to all webviews.
 5. If the same `id` is re-selected: only reveals the panel — no broadcast.
 
 ---
