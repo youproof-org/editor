@@ -5,7 +5,7 @@
  * shared @youproof.org packages from the services checkout (see services-dir.js).
  *
  *   node scripts/build.js            out/extension.js, media/panel.js, media/editor.js
- *   node scripts/build.js --tests    the same, plus out/test/host.js for test/*.test.mjs
+ *   node scripts/build.js --tests    the same, plus out/test/host.js and out/test/webview.js for test/*.test.mjs
  *
  * Type checking is separate (scripts/typecheck.js); esbuild only strips types.
  */
@@ -58,6 +58,7 @@ const builds = [
 ];
 if (process.argv.includes('--tests')) {
   builds.push({ ...host, entryPoints: [at('test/host.ts')], outfile: at('out/test/host.js') });
+  builds.push({ ...host, external: [], entryPoints: [at('test/webview.ts')], outfile: at('out/test/webview.js') });
 }
 
 fs.rmSync(at('out'), { recursive: true, force: true });

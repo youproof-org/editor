@@ -35,8 +35,8 @@ export default function FigureBlock({ block, onBlockChange }: Props) {
           onChange={e => onBlockChange({ ...block, alt: e.target.value })} />
       </Field>
       <Field label="Caption">
-        <input className="field-input" value={block.caption ?? ''}
-          onChange={e => onBlockChange({ ...block, caption: e.target.value })} />
+        <CodeMirrorField value={block.caption ?? ''}
+          onChange={v => onBlockChange({ ...block, caption: v })} />
       </Field>
       <Field label="Source">
         <input className="field-input" value={block.src}

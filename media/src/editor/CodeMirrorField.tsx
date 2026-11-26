@@ -4,6 +4,7 @@ import { EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate, keymap }
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Range } from '@codemirror/state';
 import { maskFormulas } from '../shared/formula';
+import { isInReferenceToken, referenceTokens } from './referenceTokens';
 import { useBracketEditingContext } from './contexts/BracketEditingContext';
 import { useTermEditingContext } from './contexts/TermEditingContext';
 import type { BracketInfo, RenameEvent } from './contexts/BracketEditingContext';
@@ -306,7 +307,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
       const doc = view.state.doc.toString();
       if (charPos < 0 || charPos >= doc.length) return false;
       if (doc[charPos] !== '[' && doc[charPos] !== ']') return false;
-      if (isInsideFormula(doc, charPos)) return false;
+      if (isInsideFormula(doc, charPos) || isInReferenceToken(doc, charPos)) return false;
       const span = findBracketSpanForChar(doc, charPos);
       if (!span) return false;
       if (span.contentStart === span.contentEnd) {
@@ -383,6 +384,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
           bracketDeleteKeymap,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           vsCodeTheme,
+          referenceTokens(),
           ...(bracketAutocomplete ? [syntaxPlugin] : []),
           EditorView.lineWrapping,
           transactionFilter,
