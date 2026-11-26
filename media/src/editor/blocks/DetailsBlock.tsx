@@ -12,7 +12,7 @@ export default function DetailsBlock({ block, onBlockChange }: Props) {
   return (
     <>
       <Field label="Title">
-        <CodeMirrorField value={block.title ?? ''} bracketAutocomplete
+        <CodeMirrorField readsReferences value={block.title ?? ''} bracketAutocomplete
           onChange={v => onBlockChange({ ...block, title: v || undefined })} />
       </Field>
       <BlockSequence blocks={block.blocks}

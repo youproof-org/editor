@@ -92,7 +92,7 @@ export default function ListBlockImpl({ leadIn, onLeadInChange, items, onItemsCh
   return (
     <>
       <Field label="Lead-in">
-        <CodeMirrorField value={leadIn ?? ''} bracketAutocomplete
+        <CodeMirrorField readsReferences value={leadIn ?? ''} bracketAutocomplete
           onChange={onLeadInChange} />
       </Field>
       <Field label="Items">
@@ -131,7 +131,7 @@ export const ListItemCM = forwardRef<ListItemHandle, ItemRendererProps>(
       getCursor:  () => cmRef.current?.getCursor() ?? { pos: 0, isAtStart: true, isAtEnd: true },
     }), []);
     return (
-      <CodeMirrorField ref={cmRef} value={value} bracketAutocomplete
+      <CodeMirrorField readsReferences ref={cmRef} value={value} bracketAutocomplete
         onChange={onChange} onSpecialKey={onSpecialKey} />
     );
   },

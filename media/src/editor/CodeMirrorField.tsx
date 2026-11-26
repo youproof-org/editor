@@ -6,6 +6,11 @@ import { Range } from '@codemirror/state';
 import { maskFormulas } from '../shared/formula';
 import { isInReferenceToken, referenceTokens } from './referenceTokens';
 import { useReferenceDisplays } from './referenceDisplays';
+import {
+  openReferencePopup, closeReferencePopup, ReferencePopupEdit, referencePopupField, referenceTokenAtCaret, referenceTokenClick,
+  referenceTriggerAt, selectedReferenceToken,
+} from './referencePopupState';
+import { useReferencePopupHost } from './contexts/ReferencePopupContext';
 import { useBracketEditingContext } from './contexts/BracketEditingContext';
 import { useTermEditingContext } from './contexts/TermEditingContext';
 import type { BracketInfo, RenameEvent } from './contexts/BracketEditingContext';
@@ -17,8 +22,8 @@ interface Props {
   bracketAutocomplete?: boolean;
   onSpecialKey?: (key: 'Enter' | 'Backspace' | 'Delete') => boolean;
   allowSelfReference?: boolean;
-  /** False for a field the site reads no references from, where a reference shows as an error. */
-  readsReferences?: boolean;
+  /** Whether the site reads references from the field: `[` opens the reference popup only where it does, and a token elsewhere shows as an error. */
+  readsReferences: boolean;
 }
 
 const ExternalUpdate    = Annotation.define<boolean>();
@@ -113,19 +118,11 @@ function isInsideFormula(doc: string, pos: number): boolean {
   return count % 2 === 1;
 }
 
-function isInsideEmptyBracket(doc: string, pos: number): boolean {
-  if (pos <= 0 || pos >= doc.length) return false;
-  return doc[pos - 1] === '[' && doc[pos] === ']';
+function isInsideEmptyTermMarker(doc: string, pos: number): boolean {
+  return pos >= 2 && doc.slice(pos - 2, pos + 2) === '[[]]';
 }
 
-function isInsideEmptySingleBracket(doc: string, pos: number): boolean {
-  if (!isInsideEmptyBracket(doc, pos)) return false;
-  if (pos >= 2 && doc[pos - 2] === '[') return false;
-  if (pos + 1 < doc.length && doc[pos + 1] === ']') return false;
-  return true;
-}
-
-interface BracketAt { type: 'single' | 'term'; name: string; }
+interface BracketAt { type: 'term'; name: string; }
 
 function bracketInfoAt(state: EditorState, pos: number): BracketAt | null {
   const doc = state.doc.toString();
@@ -135,22 +132,18 @@ function bracketInfoAt(state: EditorState, pos: number): BracketAt | null {
   while (i >= 0 && doc[i] !== '[' && doc[i] !== ']' && doc[i] !== '\n') i--;
   if (i < 0 || doc[i] !== '[') return null;
 
-  const isDouble = i > 0 && doc[i - 1] === '[';
+  if (i === 0 || doc[i - 1] !== '[') return null;
   const nameStart = i + 1;
 
   // Scan forward for closing bracket
   let j = pos;
   while (j < doc.length && doc[j] !== ']' && doc[j] !== '[' && doc[j] !== '\n') j++;
-  if (j >= doc.length || doc[j] !== ']') return null;
-
-  if (isDouble) {
-    if (j + 1 >= doc.length || doc[j + 1] !== ']') return null;
-  }
+  if (j + 1 >= doc.length || doc[j] !== ']' || doc[j + 1] !== ']') return null;
 
   const name = doc.slice(nameStart, j);
   if (name.length === 0) return null;
 
-  return { type: isDouble ? 'term' : 'single', name };
+  return { type: 'term', name };
 }
 
 interface BracketSpan {
@@ -225,7 +218,7 @@ export interface CodeMirrorFieldHandle {
 }
 
 const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMirrorField(
-  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false, readsReferences = true }, ref,
+  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false, readsReferences }, ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef      = useRef<EditorView | null>(null);
@@ -238,6 +231,9 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
   const ctx = useBracketEditingContext();
   const termCtx = useTermEditingContext();
   const referenceDisplays = useReferenceDisplays();
+  const popupHost = useReferencePopupHost();
+  const popupHostRef = useRef(popupHost);
+  popupHostRef.current = popupHost;
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -262,38 +258,71 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
     let prevInfo: BracketInfo | null = null;
     const syntaxPlugin = makeSyntaxPlugin(ctx.supportsTerms ?? false);
 
-    const bracketInputHandler = EditorView.inputHandler.of((view, from, to, insert) => {
-      if (insert !== '[' && insert !== ']') return false;
-      if (!bracketAutocomplete) return false;
-      if (insert === '[') {
-        if (from !== to) return false;
-        const doc = view.state.doc.toString();
-        if (isInsideFormula(doc, from)) return false;
-        const charBefore   = from > 0 ? doc[from - 1] : '';
-        const charAfter    = from < doc.length ? doc[from] : '';
-        const insideSingle = charBefore === '[' && charAfter === ']';
-        const insideDouble = insideSingle && from >= 2 && doc[from - 2] === '[';
-        if (insideSingle) {
-          if (!insideDouble && ctx.supportsTerms) {
+    const openPopup = (view: EditorView, mode: 'create' | 'edit', from: number, to: number, query = ''): boolean => {
+      const host = popupHostRef.current;
+      if (!host) return false;
+      view.dispatch({ effects: openReferencePopup.of({ mode, from, to }) });
+      const canHoldTermMarker = mode === 'create' && from === to && bracketAutocomplete && (ctx.supportsTerms ?? false);
+      host.open({
+        view, mode, from, to, query, allowSelfReference: allowSelfRefRef.current,
+        ...(canHoldTermMarker ? {
+          insertTermMarker: () => {
+            const session = view.state.field(referencePopupField, false);
+            if (!session) return;
             view.dispatch({
-              changes: [
-                { from, to: from, insert: '[' },
-                { from: from + 1, to: from + 1, insert: ']' },
-              ],
-              selection: { anchor: from + 1 },
+              changes: { from: session.from, to: session.to, insert: '[[]]' },
+              selection: { anchor: session.from + 2 },
+              effects: closeReferencePopup.of(null),
               annotations: BracketAutoEdit.of(true),
             });
-          }
-          // [ is not a valid name character — block without inserting
+            view.focus();
+          },
+        } : {}),
+      });
+      return true;
+    };
+
+    const triggerAt = (view: EditorView, from: number, to: number): boolean => {
+      if (!popupHostRef.current) return false;
+      const trigger = referenceTriggerAt(
+        view.state.doc.toString(), { from, to, head: view.state.selection.main.head }, readsReferences,
+      );
+      return trigger ? openPopup(view, 'create', trigger.from, trigger.to, trigger.query) : false;
+    };
+    // Caught at keydown, before the browser types the bracket, so that the editor
+    // doesn't redraw its selection, and take the focus back from the popup, after it opens.
+    const referenceTrigger = [
+      EditorView.domEventHandlers({
+        keydown: (event, view) => {
+          if (event.key !== '[' || event.ctrlKey || event.metaKey || event.isComposing) return false;
+          const { from, to } = view.state.selection.main;
+          if (!triggerAt(view, from, to)) return false;
+          event.preventDefault();
           return true;
-        }
-        view.dispatch({
-          changes: { from, to, insert: '[]' },
-          selection: { anchor: from + 1 },
-          annotations: BracketAutoEdit.of(true),
-        });
-        return true;
-      }
+        },
+      }),
+      EditorView.inputHandler.of((view, from, to, insert) => insert === '[' && triggerAt(view, from, to)),
+    ];
+
+    const referenceKeymap = Prec.highest(keymap.of([
+      {
+        key: 'F2',
+        run: (view) => {
+          const token = referenceTokenAtCaret(view.state);
+          return token ? openPopup(view, 'edit', token.from, token.to) : false;
+        },
+      },
+      {
+        key: 'Enter',
+        run: (view) => {
+          const token = selectedReferenceToken(view.state);
+          return token ? openPopup(view, 'edit', token.from, token.to) : false;
+        },
+      },
+    ]));
+
+    const bracketInputHandler = EditorView.inputHandler.of((view, from, to, insert) => {
+      if (!bracketAutocomplete) return false;
       if (insert === ']') {
         if (from !== to) return false;
         const doc = view.state.doc.toString();
@@ -356,25 +385,15 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
       if (!tr.docChanged) return tr;
       if (tr.annotation(ExternalUpdate)) return tr;
       if (tr.annotation(BracketAutoEdit)) return tr;
+      if (tr.annotation(ReferencePopupEdit)) return tr;
       const pos  = tr.startState.selection.main.head;
       const info = bracketInfoAt(tr.startState, pos);
-      const startDoc = tr.startState.doc.toString();
-      const inEmptySingle = !info && isInsideEmptySingleBracket(startDoc, pos);
-      const inEmpty       = !info && isInsideEmptyBracket(startDoc, pos);
-      if (!info && !inEmpty) return tr;
-      // Inside a bracket — restrict insertions; deletions always pass.
+      if (!info && !isInsideEmptyTermMarker(tr.startState.doc.toString(), pos)) return tr;
+      // Inside a term marker — restrict insertions to name characters; deletions always pass.
       let ok = true;
       tr.changes.iterChanges((_fa, _ta, _fb, _tb, inserted) => {
         const s = inserted.toString();
-        if (s.length === 0) return;
-        if (info) {
-          if (info.name === '*') { ok = false; return; }                         // [*] complete — locked
-          if (!/^[a-zA-Z0-9\-]+$/.test(s)) ok = false;
-          return;
-        }
-        // empty bracket (single or double)
-        if (inEmptySingle && allowSelfRefRef.current && s === '*') return;       // OK — produces [*]
-        if (!/^[a-zA-Z0-9\-]+$/.test(s)) ok = false;
+        if (s.length > 0 && !/^[a-zA-Z0-9\-]+$/.test(s)) ok = false;
       });
       return ok ? tr : [];
     });
@@ -390,12 +409,15 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
         doc: value,
         extensions: [
           history(),
+          referenceKeymap,
           specialKeymap,
+          referenceTrigger,
           bracketInputHandler,
           bracketDeleteKeymap,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           vsCodeTheme,
           referenceTokens({ displays: referenceDisplays, readsReferences }),
+          referenceTokenClick.of((view, from, to) => { openPopup(view, 'edit', from, to); }),
           ...(bracketAutocomplete ? [syntaxPlugin] : []),
           EditorView.lineWrapping,
           transactionFilter,

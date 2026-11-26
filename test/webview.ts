@@ -7,3 +7,5 @@ export { encodeReferenceToken, findReferenceTokens } from '../src/protocol/refer
 export { referencePlacements } from '../src/protocol/referencePlacement';
 export * from '../media/src/editor/referencePopupModel';
 export * from '../media/src/editor/referencePopupPlacement';
+export * from '../media/src/editor/referencePopupState';
+export { undoDepth } from '@codemirror/commands';

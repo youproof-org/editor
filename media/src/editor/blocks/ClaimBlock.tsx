@@ -64,7 +64,7 @@ export default function ClaimBlock({ block, onBlockChange }: Props) {
         )}
       </Field>
       <Field label="Content">
-        <CodeMirrorField ref={fieldRef} value={block.content} bracketAutocomplete
+        <CodeMirrorField readsReferences ref={fieldRef} value={block.content} bracketAutocomplete
           onChange={v => onBlockChange({ ...block, content: v })} />
       </Field>
       <Field label="Formula">

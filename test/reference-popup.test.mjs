@@ -241,3 +241,39 @@ test('an anchor scrolled out of the pane closes the popup', () => {
   assert.equal(anchorInPane([rect(-10, 40)], PANE), true, 'partly visible')
   assert.equal(anchorInPane([], PANE), false)
 })
+
+const { referenceTriggerAt, secondBracketAction, encodeReferenceToken } = require('../out/test/webview.js')
+
+function trigger(marked, readsReferences = true) {
+  const from = marked.indexOf('|')
+  const to = marked.lastIndexOf('|') - (marked.indexOf('|') === marked.lastIndexOf('|') ? 0 : 1)
+  const doc = marked.replace(/\|/g, '')
+  return referenceTriggerAt(doc, { from, to, head: to }, readsReferences)
+}
+
+test('[ opens the create popup where the site would read a reference put at the caret, and nowhere else', () => {
+  assert.deepEqual(trigger('Ha $n$ |'), { from: 7, to: 7, query: '' })
+  assert.deepEqual(trigger('Ez **félkövér | szöveg**.'), { from: 14, to: 14, query: '' }, 'the site reads references inside bold')
+  assert.equal(trigger('Ha $n |+1$ prím'), null, 'inside $...$')
+  assert.equal(trigger('Ha $n |'), null, 'after an unclosed $, while the formula is being typed')
+  assert.equal(trigger('Lásd ^lábjegyzet |^.'), null, 'inside ^...^')
+  assert.equal(trigger('Egy [[pri|me]] szó'), null, 'inside a term marker')
+  assert.equal(trigger('Egy [[|]] szó'), null, 'inside an empty term marker')
+  assert.equal(trigger('Szöveg |', false), null, 'a field the site reads no references from')
+  assert.deepEqual(trigger(`Lásd ${encodeReferenceToken({ text: 'x', target: 'theorems.t' })} és |`).query, '')
+})
+
+test('[ with a selection searches for the selected words and replaces them, unless the selection holds a token or spans lines', () => {
+  assert.deepEqual(trigger('Ha $n$ | prím |szám'), { from: 8, to: 12, query: 'prím' }, 'the spaces around it stay')
+  const token = encodeReferenceToken({ text: 'x', target: 'theorems.t' })
+  const withToken = `Lásd |a ${token}| itt`
+  const doc = withToken.replace(/\|/g, '')
+  assert.deepEqual(referenceTriggerAt(doc, { from: 5, to: 7 + token.length, head: 7 + token.length }, true), { from: 7 + token.length, to: 7 + token.length, query: '' })
+  assert.deepEqual(referenceTriggerAt('egy\nkettő', { from: 1, to: 6, head: 6 }, true), { from: 6, to: 6, query: '' })
+})
+
+test('a second [ in an empty search box makes a term marker where the field can hold one, is ignored elsewhere, and searches after a word', () => {
+  assert.equal(secondBracketAction('', true), 'term-marker')
+  assert.equal(secondBracketAction('', false), 'ignore')
+  assert.equal(secondBracketAction('prím', true), 'search')
+})

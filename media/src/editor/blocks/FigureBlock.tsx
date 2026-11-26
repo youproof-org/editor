@@ -27,7 +27,7 @@ export default function FigureBlock({ block, onBlockChange }: Props) {
         />
       </Field>
       <Field label="Lead-in">
-        <CodeMirrorField value={block.leadIn ?? ''} bracketAutocomplete allowSelfReference
+        <CodeMirrorField readsReferences value={block.leadIn ?? ''} bracketAutocomplete allowSelfReference
           onChange={v => onBlockChange({ ...block, leadIn: v })} />
       </Field>
       <Field label="Alt">
@@ -35,7 +35,7 @@ export default function FigureBlock({ block, onBlockChange }: Props) {
           onChange={e => onBlockChange({ ...block, alt: e.target.value })} />
       </Field>
       <Field label="Caption">
-        <CodeMirrorField value={block.caption ?? ''}
+        <CodeMirrorField readsReferences value={block.caption ?? ''}
           onChange={v => onBlockChange({ ...block, caption: v })} />
       </Field>
       <Field label="Source">

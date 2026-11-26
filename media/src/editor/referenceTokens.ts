@@ -3,10 +3,11 @@ import {
 } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view';
 import { capitalizeSegments } from '@youproof.org/display-templates';
-import { findReferenceTokens, referenceTokenLabel, type ReferenceTokenMatch } from '../shared/referenceToken';
+import { decodeReferencePayload, findReferenceTokens, referenceTokenLabel, type ReferenceTokenMatch } from '../shared/referenceToken';
 import { referencePlacements, type ReferencePlacement } from '../shared/referencePlacement';
 import type { ReferenceTokenDisplay } from '../shared/types';
 import type { ReferenceDisplaySource } from './referenceDisplays';
+import { referencePopupField, referenceTokenClick, type ReferencePopupSession } from './referencePopupState';
 
 /** What a token shows: its rendered display, or its name while it renders or when it can't. */
 export interface ReferenceTokenView {
@@ -53,17 +54,31 @@ export function referenceTokenText(view: ReferenceTokenView): string {
   return view.parts.map((part) => (part.target === undefined ? part.text : `[${part.text}]`)).join('');
 }
 
+/** How a token stands out: `active` while its popup is open, `ghost` for the draft of a popup that creates one. */
+type WidgetRole = 'token' | 'active' | 'ghost';
+
 class ReferenceWidget extends WidgetType {
   private readonly key: string;
-  constructor(readonly view: ReferenceTokenView) {
+  constructor(readonly view: ReferenceTokenView, readonly role: WidgetRole = 'token') {
     super();
-    this.key = JSON.stringify(view);
+    this.key = JSON.stringify([view, role]);
   }
   eq(other: ReferenceWidget): boolean { return other.key === this.key; }
-  toDOM(): HTMLElement {
+  toDOM(editor: EditorView): HTMLElement {
     const span = document.createElement('span');
-    span.className = `cm-yp-ref cm-yp-ref-${this.view.state}`;
+    span.className = `cm-yp-ref cm-yp-ref-${this.view.state}${this.role === 'token' ? '' : ` cm-yp-ref-${this.role}`}`;
     if (this.view.reason) span.title = this.view.reason;
+    if (this.role !== 'ghost') {
+      span.addEventListener('mousedown', (event) => {
+        const open = editor.state.facet(referenceTokenClick);
+        if (!open || event.button !== 0) return;
+        const from = editor.posAtDOM(span);
+        const token = findReferenceTokens(editor.state.doc.toString()).find((t) => t.from === from);
+        if (!token) return;
+        event.preventDefault();
+        open(editor, token.from, token.to);
+      });
+    }
     if (this.view.state !== 'rendered') {
       span.textContent = `[${this.view.parts.map((part) => part.text).join('')}]`;
       return span;
@@ -92,20 +107,51 @@ export interface ReferenceTokenOptions {
 
 const displaysChanged = StateEffect.define<null>();
 
+function decodedItem(payload: string): unknown {
+  try {
+    return decodeReferencePayload(payload);
+  } catch {
+    return undefined;
+  }
+}
+
 function tokenDecorations(state: EditorState, options: ReferenceTokenOptions): DecorationSet {
   const text = state.doc.toString();
+  const session = state.field(referencePopupField, false) ?? null;
+  const view = (payload: string, item: unknown, placement: ReferencePlacement): ReferenceTokenView => {
+    const display = item === undefined ? undefined : options.displays?.get(payload);
+    return referenceTokenView({ item }, placement, display, options.readsReferences);
+  };
   const placements = referencePlacements(text);
-  return Decoration.set(findReferenceTokens(text).map((token, i) => {
-    const display = token.item === undefined ? undefined : options.displays?.get(token.payload);
-    const view = referenceTokenView(token, placements[i], display, options.readsReferences);
-    return Decoration.replace({ widget: new ReferenceWidget(view) }).range(token.from, token.to);
-  }));
+  const decorations = findReferenceTokens(text).map((token, i) => {
+    const active = session?.mode === 'edit' && session.from === token.from;
+    const payload = active && session.preview ? session.preview : token.payload;
+    const item = payload === token.payload ? token.item : decodedItem(payload);
+    return Decoration.replace({ widget: new ReferenceWidget(view(payload, item, placements[i]), active ? 'active' : 'token') })
+      .range(token.from, token.to);
+  });
+  const ghost = session?.mode === 'create' && session.preview ? ghostDecoration(text, session, view) : null;
+  return Decoration.set(ghost ? [...decorations, ghost] : decorations, true);
+}
+
+/** The draft of a create popup where it would go, shown as the token it would be. */
+function ghostDecoration(
+  text: string, session: ReferencePopupSession, view: (payload: string, item: unknown, placement: ReferencePlacement) => ReferenceTokenView,
+) {
+  const payload = session.preview!;
+  const before = text.slice(0, session.from);
+  const placement = referencePlacements(`${before}[@${payload}]${text.slice(session.to)}`)[findReferenceTokens(before).length];
+  const widget = new ReferenceWidget(view(payload, decodedItem(payload), placement), 'ghost');
+  return session.from === session.to
+    ? Decoration.widget({ widget, side: 1 }).range(session.from)
+    : Decoration.replace({ widget }).range(session.from, session.to);
 }
 
 function referenceTokenField(options: ReferenceTokenOptions) {
   return StateField.define<DecorationSet>({
     create: (state) => tokenDecorations(state, options),
-    update: (decorations, tr) => (tr.docChanged || tr.effects.some((effect) => effect.is(displaysChanged))
+    update: (decorations, tr) => (tr.docChanged || tr.effects.some((effect) => effect.is(displaysChanged)) ||
+      tr.startState.field(referencePopupField, false) !== tr.state.field(referencePopupField, false)
       ? tokenDecorations(tr.state, options)
       : decorations),
     provide: (field) => [
@@ -188,6 +234,7 @@ const keepTokensWhole = EditorState.transactionFilter.of((tr) => {
  */
 export function referenceTokens(options: ReferenceTokenOptions = {}): Extension {
   return [
+    referencePopupField,
     referenceTokenField(options),
     keepTokensWhole,
     ...(options.displays ? [rerenderOnDisplayChange(options.displays)] : []),

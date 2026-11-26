@@ -10,7 +10,7 @@ interface Props {
 export default function NarrativeBlock({ block, onBlockChange }: Props) {
   return (
     <Field label="Content">
-      <CodeMirrorField value={block.content} bracketAutocomplete
+      <CodeMirrorField readsReferences value={block.content} bracketAutocomplete
         onChange={v => onBlockChange({ ...block, content: v })} />
     </Field>
   );

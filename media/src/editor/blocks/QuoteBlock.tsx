@@ -11,11 +11,11 @@ export default function QuoteBlock({ block, onBlockChange }: Props) {
   return (
     <>
       <Field label="Lead-in">
-        <CodeMirrorField value={block.leadIn ?? ''} bracketAutocomplete
+        <CodeMirrorField readsReferences value={block.leadIn ?? ''} bracketAutocomplete
           onChange={v => onBlockChange({ ...block, leadIn: v })} />
       </Field>
       <Field label="Quote">
-        <CodeMirrorField value={block.quote}
+        <CodeMirrorField readsReferences value={block.quote}
           onChange={v => onBlockChange({ ...block, quote: v })} />
       </Field>
       <Field label="Author">
