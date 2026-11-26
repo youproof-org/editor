@@ -46,10 +46,6 @@ export default function ReferencePopupProvider({ nodeId, children }: Props) {
     open(request) {
       const current = openRef.current?.request;
       if (current && current.view !== request.view && current.view.dom.isConnected) current.view.dispatch(cancelReferenceSpec());
-      if (request.mode === 'edit') {
-        request.view.dispatch(cancelReferenceSpec());
-        return;
-      }
       if (staleRef.current) loadRef.current();
       setOpen({ key: nextKey.current++, request });
     },

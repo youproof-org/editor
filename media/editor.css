@@ -807,3 +807,15 @@ details > summary:hover { opacity: 0.8; }
   padding: 0 4px;
 }
 .ref-popup-icon-btn:hover { opacity: 1; }
+.ref-popup-icon-btn--next { margin-left: 0; }
+.ref-popup-group { padding: 2px 8px 0 16px; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.ref-popup-link-btn {
+  margin: 2px 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  cursor: pointer;
+  font: inherit;
+}
+.ref-popup-link-btn:hover { text-decoration: underline; }

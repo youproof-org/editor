@@ -1,17 +1,19 @@
 import { KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { capitalizeSegments } from '@youproof.org/display-templates';
 import Badge from './Badge';
-import { encodeReferenceToken } from '../shared/referenceToken';
+import { encodeReferenceToken, findReferenceTokens } from '../shared/referenceToken';
 import type { ContentTargetObject, ReferenceChoices, ReferenceTargetChoice, ReferenceTokenSegment } from '../shared/types';
 import type { ReferencePopupRequest } from './contexts/ReferencePopupContext';
 import { useTargetSelectionContext } from './contexts/TargetSelectionContext';
 import { useReferenceDisplays } from './referenceDisplays';
 import {
-  buildReferenceItem, candidateTemplates, choicesByPath, draftProblem, draftTarget, filterTemplates, kindsKey,
-  searchReferenceTargets, textFromSegments, textModeProblem, type DraftTarget, type ReferenceDraft, type SearchHit,
+  buildReferenceItem, candidateTemplates, canReorder, choicesByPath, draftFromItem, draftProblem, draftTarget, filterTemplates,
+  kindsKey, leavesItemUnchanged, orderedTargets, searchReferenceTargets, targetGroups, textFromSegments, textModeProblem,
+  type DraftTarget, type ReferenceDraft, type SearchHit,
 } from './referencePopupModel';
 import {
-  cancelReferenceSpec, confirmReferenceSpec, confirmSelfReferenceSpec, previewReference, probePlacement, secondBracketAction,
+  cancelReferenceSpec, confirmReferenceSpec, confirmSelfReferenceSpec, previewReference, probePlacement, removeReferenceSpec,
+  secondBracketAction,
 } from './referencePopupState';
 import { useReferencePopupPlacement } from './hooks/useReferencePopupPlacement';
 
@@ -99,20 +101,25 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
   const [filter, setFilter] = useState('');
   const [picking, setPicking] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [adding, setAdding] = useState<{ replace?: string } | null>(null);
+  const [damaged, setDamaged] = useState<string | null>(null);
   const pickingRef = useRef(false);
   pickingRef.current = picking;
+  const editing = request.mode === 'edit';
+  const [original] = useState(() => (editing ? findReferenceTokens(view.state.sliceDoc(request.from, request.to))[0] : undefined));
 
   const templates = choices?.templates ?? [];
   const byPath = useMemo(() => (choices ? choicesByPath(choices) : new Map<string, ReferenceTargetChoice>()), [choices]);
-  const hits = useMemo(() => (choices ? searchReferenceTargets(choices, query, { allowSelfReference: request.allowSelfReference }) : []),
-    [choices, query, request.allowSelfReference]);
+  const hits = useMemo(() => (choices ? searchReferenceTargets(choices, query, { allowSelfReference: request.allowSelfReference && !adding }) : []),
+    [choices, query, request.allowSelfReference, adding]);
   const selectedText = request.from < request.to ? view.state.sliceDoc(request.from, request.to) : '';
   const [sentenceStart] = useState(() => probePlacement(view.state.doc.toString(), request.from, request.to)?.sentenceStart ?? false);
 
   const focusRef = useRef<HTMLInputElement>(null);
+  const removeRef = useRef<HTMLButtonElement>(null);
   const cancelPickRef = useRef<HTMLButtonElement>(null);
-  const screen = picking ? 'picking' : !draft ? 'search' : draft.mode;
-  useLayoutEffect(() => { (focusRef.current ?? cancelPickRef.current)?.focus(); }, [screen]);
+  const screen = damaged ? 'damaged' : picking ? 'picking' : !draft || adding ? 'search' : draft.mode;
+  useLayoutEffect(() => { (focusRef.current ?? removeRef.current ?? cancelPickRef.current)?.focus(); }, [screen]);
   useEffect(() => displays?.subscribe(rerender), [displays]);
   useEffect(() => { setHitIndex(0); }, [query]);
   useEffect(() => {
@@ -130,6 +137,15 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
     if (display.error !== undefined) return { state: 'error', reason: display.error };
     return { state: 'rendered', segments: sentenceStart ? capitalizeSegments(display.segments) : display.segments };
   };
+
+  const startedEdit = useRef(false);
+  useEffect(() => {
+    if (!editing || !choices || choices.error || startedEdit.current) return;
+    startedEdit.current = true;
+    const edited = original?.item !== undefined ? draftFromItem(original.item, byPath) : undefined;
+    if (edited) setDraft(edited);
+    else setDamaged(original?.item === undefined ? 'This reference is damaged and can\'t be read.' : 'This reference is not one the popup can edit.');
+  }, [choices]);
 
   const finish = (spec: Parameters<typeof view.dispatch>[0]) => {
     if (pickingRef.current) selection.onEndSelectTarget(null);
@@ -158,8 +174,48 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
       : { mode: 'text', text, targets });
   };
 
+  const addTarget = (target: DraftTarget) => {
+    const replace = adding?.replace;
+    setDraft((d) => {
+      if (!d) return d;
+      const at = replace ? d.targets.findIndex((t) => t.path === replace) : -1;
+      const rest = d.targets.filter((t) => t.path !== replace && t.path !== target.path);
+      const targets = at >= 0 ? [...rest.slice(0, at), target, ...rest.slice(at)] : [...rest, target];
+      return { ...d, targets };
+    });
+    setAdding(null);
+    setQuery('');
+    setNotice(null);
+  };
+
+  const removeTarget = (path: string) => {
+    const targets = draft ? draft.targets.filter((t) => t.path !== path) : [];
+    if (targets.length === 0 && !editing) {
+      setDraft(null);
+      view.dispatch({ effects: previewReference.of(null) });
+      return;
+    }
+    setDraft((d) => (d ? { ...d, targets } : d));
+  };
+
+  const moveTarget = (path: string, step: number) => setDraft((d) => {
+    if (!d) return d;
+    const at = d.targets.findIndex((t) => t.path === path);
+    const to = at + step;
+    if (at < 0 || to < 0 || to >= d.targets.length) return d;
+    const targets = [...d.targets];
+    [targets[at], targets[to]] = [targets[to], targets[at]];
+    return { ...d, targets };
+  });
+
   const chooseHit = (hit: SearchHit | undefined, more = false) => {
     if (!hit) return;
+    if (adding) {
+      if (hit.kind === 'term' || hit.kind === 'target') addTarget(draftTarget(hit.target.path, byPath));
+      else if (hit.kind === 'url') addTarget({ path: hit.url, kind: 'external' });
+      else if (hit.kind === 'path') addTarget(draftTarget(hit.path, byPath));
+      return;
+    }
     if (hit.kind === 'self') finish(confirmSelfReferenceSpec(view.state));
     else if (hit.kind === 'term') {
       const text = selectedText || hit.text;
@@ -174,11 +230,12 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
     setPicking(false);
     if (!result) return;
     if (!result.path) {
-      setNotice(`${result.label} can't be referenced: the site gives it no address.`);
+      setNotice(`${result.label} can't be a reference target: a remark that nothing lists has no address, and the site doesn't number a claim inside a subsection or a details block.`);
       return;
     }
     const target = draftTarget(result.path, byPath);
-    startDisplay([target], selectedText || (target.kind === 'term' ? byPath.get(result.path)?.label ?? '' : ''));
+    if (adding) addTarget(target);
+    else startDisplay([target], selectedText || (target.kind === 'term' ? byPath.get(result.path)?.label ?? '' : ''));
   };
   const pickedRef = useRef(picked);
   pickedRef.current = picked;
@@ -207,8 +264,8 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
     else if (e.key === 'ArrowDown') { e.preventDefault(); setHitIndex((i) => Math.min(i + 1, hits.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHitIndex((i) => Math.max(i - 1, 0)); }
     else if (e.key === 'Enter') { e.preventDefault(); chooseHit(hits[hitIndex]); }
-    else if (e.key === 'Tab' && !e.shiftKey && hits[hitIndex]) { e.preventDefault(); chooseHit(hits[hitIndex], true); }
-    else if (e.key === '[') {
+    else if (e.key === 'Tab' && !e.shiftKey && hits[hitIndex] && !adding) { e.preventDefault(); chooseHit(hits[hitIndex], true); }
+    else if (e.key === '[' && !adding) {
       const action = secondBracketAction(query, request.insertTermMarker !== undefined);
       if (action === 'search') return;
       e.preventDefault();
@@ -217,7 +274,7 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
         request.insertTermMarker!();
         onClose();
       }
-    } else if (e.key === '*' && query === '' && request.allowSelfReference) {
+    } else if (e.key === '*' && query === '' && request.allowSelfReference && !adding) {
       e.preventDefault();
       finish(confirmSelfReferenceSpec(view.state));
     }
@@ -225,7 +282,7 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
 
   const candidates = draft ? candidateTemplates(templates, draft.targets) : [];
   const key = draft ? kindsKey(draft.targets.map((t) => t.kind)) : '';
-  const previewOf = (name: string) => (draft ? shownFor({ display: name, ...(draft.targets.length === 1 ? { target: draft.targets[0].path } : { targets: draft.targets.map((t) => t.path) }) }) : { state: 'pending' as const });
+  const previewOf = (name: string): Shown => (draft ? shownFor(buildReferenceItem({ ...draft, mode: 'template', display: name }, templates)) : { state: 'pending' });
   const previewText = (name: string) => {
     const shown = previewOf(name);
     return shown.state === 'rendered' ? textFromSegments(shown.segments) : undefined;
@@ -246,7 +303,12 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
     return { ...d, mode, text };
   });
 
-  const confirmDraft = () => { if (item) confirmItem(item); };
+  const confirmDraft = () => {
+    if (!item || !draft) return;
+    if (editing && leavesItemUnchanged(original?.item, draft, templates)) finish(cancelReferenceSpec());
+    else confirmItem(item);
+  };
+  const remove = () => finish(removeReferenceSpec(view.state));
   const onDisplayKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); cancel(); }
     else if (e.key === 'Enter') { e.preventDefault(); confirmDraft(); }
@@ -271,8 +333,16 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
     : { top: 0, left: 0, width: POPUP_WIDTH, opacity: 0 };
 
   let body: ReactNode;
-  if (!choices && choicesError) {
-    body = <div className="ref-popup-message">{`The editor could not load what references can target: ${choicesError}`}</div>;
+  if (damaged) {
+    body = <>
+      <div className="ref-popup-message ref-popup-problem">{damaged}</div>
+      <div className="ref-popup-footer">
+        <span>Esc</span>
+        <button ref={removeRef} className="ref-popup-btn" onClick={remove}>Remove</button>
+      </div>
+    </>;
+  } else if (!choices && (editing || choicesError)) {
+    body = <div className="ref-popup-message">{choicesError ? `The editor could not load what references can target: ${choicesError}` : 'Loading…'}</div>;
   } else if (choices?.error) {
     body = <div className="ref-popup-message ref-popup-problem">{choices.error}</div>;
   } else if (picking) {
@@ -284,10 +354,11 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
         </div>
       </div>
     );
-  } else if (!draft) {
+  } else if (!draft || adding) {
     let group = '';
     body = <>
-      <input ref={focusRef} className="ref-popup-input" value={query} placeholder="Search terms, numbers and titles, or paste a URL"
+      <input ref={focusRef} className="ref-popup-input" value={query}
+        placeholder={adding ? (adding.replace ? `Search for what replaces ${adding.replace}` : 'Search for a target to add') : 'Search terms, numbers and titles, or paste a URL'}
         onChange={(e) => setQuery(e.target.value)} onKeyDown={onSearchKey} />
       <div className="ref-popup-list">
         {hits.length === 0 && <div className="ref-popup-message">{!choices ? 'Loading…' : query.trim() ? 'Nothing found.' : 'Type to search.'}</div>}
@@ -305,21 +376,50 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
       </div>
       {notice && <div className="ref-popup-message ref-popup-problem">{notice}</div>}
       <div className="ref-popup-footer">
-        <span>Enter insert · Tab more · Esc</span>
-        <button className="ref-popup-btn" disabled={selection.selectingSelectorId !== null} onClick={pickInSidebar}>Pick in sidebar</button>
+        <span>{adding ? 'Enter add · Esc' : 'Enter insert · Tab more · Esc'}</span>
+        <span className="ref-popup-actions">
+          {adding && <button className="ref-popup-btn" onClick={() => { setAdding(null); setQuery(''); }}>Back</button>}
+          <button className="ref-popup-btn" disabled={selection.selectingSelectorId !== null} onClick={pickInSidebar}>Pick in sidebar</button>
+        </span>
       </div>
     </>;
   } else {
     const textProblem = textModeProblem(draft);
+    const template = draft.mode === 'template' ? templates.find((t) => t.name === draft.display) : undefined;
+    const reorder = canReorder(draft, templates);
+    const groups = targetGroups(orderedTargets(draft, templates), template, byPath);
+    const heading = draft.targets.length < 2 ? 'Target'
+      : reorder ? 'Targets'
+      : `Targets (in reading order${template?.list && template.groupBy ? `, grouped by ${template.groupBy}` : ''})`;
     body = <>
       <div className="ref-popup-section">
-        <div className="ref-popup-heading">Target</div>
-        {draft.targets.map((target) => (
-          <div key={target.path} className="ref-popup-row ref-popup-row--static">
-            <TargetLine target={target} choice={byPath.get(target.path)} />
-            <button className="ref-popup-icon-btn" title="Choose another target" onClick={() => { setDraft(null); view.dispatch({ effects: previewReference.of(null) }); }}>✕</button>
+        <div className="ref-popup-heading">{heading}</div>
+        {groups.map((group, g) => (
+          <div key={g}>
+            {group.header && <div className="ref-popup-group">{group.header}</div>}
+            {group.targets.map((target) => {
+              const choice = byPath.get(target.path);
+              const stale = !choice && REFERENCE_TARGET_KINDS.includes(target.kind);
+              return (
+                <div key={target.path} className="ref-popup-row ref-popup-row--static">
+                  <TargetLine target={target} choice={choice} />
+                  {stale && <span className="ref-popup-warning" title={`'${target.path}' is not in the content the editor loaded.`}>not found</span>}
+                  {stale && <button className="ref-popup-btn" onClick={() => setAdding({ replace: target.path })}>Re-pick</button>}
+                  {reorder && <>
+                    <button className="ref-popup-icon-btn" title="Move up" onClick={() => moveTarget(target.path, -1)}>↑</button>
+                    <button className="ref-popup-icon-btn ref-popup-icon-btn--next" title="Move down" onClick={() => moveTarget(target.path, 1)}>↓</button>
+                  </>}
+                  {(choice || target.kind === 'external') && (
+                    <button className={`ref-popup-icon-btn${reorder ? ' ref-popup-icon-btn--next' : ''}`} title="Open"
+                      onClick={() => selection.onOpenTarget(choice ? choice.id : target.path, choice ? choice.kind : 'external')}>↗</button>
+                  )}
+                  <button className="ref-popup-icon-btn ref-popup-icon-btn--next" title="Remove this target" onClick={() => removeTarget(target.path)}>✕</button>
+                </div>
+              );
+            })}
           </div>
         ))}
+        <button className="ref-popup-link-btn" onClick={() => { setAdding({}); setQuery(''); }}>+ Add target</button>
       </div>
       <div className="ref-popup-modes">
         <button className={`ref-popup-mode${draft.mode === 'template' ? ' ref-popup-mode--on' : ''}`} disabled={candidates.length === 0}
@@ -331,6 +431,9 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
             onChange={(e) => setFilter(e.target.value)} onKeyDown={onDisplayKey} />
         )}
       </div>
+      {draft.mode === 'template' && problem && draft.targets.length > 0 && (
+        <div className="ref-popup-message ref-popup-problem">! {problem}{listed.length > 0 ? '. Choose a template:' : ''}</div>
+      )}
       {draft.mode === 'template' ? (
         <div className="ref-popup-list">
           {listed.length === 0 && <div className="ref-popup-message">No template matches.</div>}
@@ -340,7 +443,7 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
               <div key={template.name} ref={selected ? selectedRowRef : undefined}
                 className={`ref-popup-row${selected ? ' ref-popup-row--selected' : ''}`}
                 onMouseDown={(e) => { e.preventDefault(); chooseTemplate(template.name); }}
-                onDoubleClick={() => confirmItem(buildReferenceItem({ ...draft, mode: 'template', display: template.name }, templates))}>
+                onDoubleClick={() => { if (!draftProblem({ ...draft, mode: 'template', display: template.name }, templates)) confirmItem(buildReferenceItem({ ...draft, mode: 'template', display: template.name }, templates)); }}>
                 <Rendered shown={previewOf(template.name)} fallback={template.name} />
                 <span className="ref-popup-dim ref-popup-name" title={template.name}>{template.name}</span>
                 <span className="ref-popup-count">{template.uses[key] ?? ''}</span>
@@ -356,11 +459,16 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
       )}
       <div className="ref-popup-section ref-popup-preview">
         <span className="ref-popup-heading">Preview</span>
-        {item ? <Rendered shown={shownFor(item)} /> : <span className="ref-popup-problem">{problem}</span>}
+        {item ? <Rendered shown={shownFor(item)} />
+          : draft.mode === 'template' && draft.targets.length > 0 ? <span className="ref-popup-dim">none until the template takes the targets</span>
+          : <span className="ref-popup-problem">{problem}</span>}
       </div>
       <div className="ref-popup-footer">
-        <span>Enter insert · Esc</span>
-        <button className="ref-popup-btn ref-popup-btn--primary" disabled={!item} onClick={confirmDraft}>Insert</button>
+        <span>{editing ? 'Enter apply · Esc' : 'Enter insert · Esc'}</span>
+        <span className="ref-popup-actions">
+          {editing && <button className="ref-popup-btn" onClick={remove}>Remove</button>}
+          <button className="ref-popup-btn ref-popup-btn--primary" disabled={!item} onClick={confirmDraft}>{editing ? 'Apply' : 'Insert'}</button>
+        </span>
       </div>
     </>;
   }
