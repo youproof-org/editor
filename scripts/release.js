@@ -19,7 +19,7 @@
  *
  * Services note: the VSIX bundles @youproof.org/content-model and
  * @youproof.org/display-templates from a services checkout (SERVICES_DIR, else
- * ../services). That checkout must be clean, and its commit goes into the release
+ * ../services). That checkout must be clean and pushed, and its commit goes into the release
  * notes, so a release can be traced to the shared code it was built from.
  */
 
@@ -123,6 +123,10 @@ try {
 }
 if (inServices(['status', '--porcelain']) !== '') {
   fail(`the services checkout at ${services.dir} is dirty. The VSIX bundles its packages, so commit or stash its changes before releasing.`);
+}
+inServices(['fetch', 'origin', '--quiet']);
+if (inServices(['branch', '--remotes', '--contains', servicesCommit]) === '') {
+  fail(`services ${servicesCommit} is not on any branch of origin. Push it first, so the commit the release notes name exists on GitHub.`);
 }
 console.log(`release: bundling services ${servicesCommit} (${servicesBranch}) from ${services.dir}`);
 
