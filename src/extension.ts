@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { MessageServer } from './protocol/messageServer';
 import { SidebarProvider } from './views/sidebarProvider';
@@ -5,6 +6,9 @@ import { PanelManager } from './views/panelManager';
 import { loadContent } from './content/loader';
 import { setLocales } from './content/locales';
 import { readServicesData, ServicesDataError, type ServicesData } from './content/servicesData';
+import {
+  describeDisplayTemplateErrors, DISPLAY_TEMPLATES_DIR, displayTemplatesFile, readDisplayTemplates, type DisplayTemplates,
+} from './content/displayTemplates';
 import type { LoadedContent } from './content/model';
 import { registerHandlers, resolveContentRoot, resolveServicesRootSetting } from './handlers';
 
@@ -18,6 +22,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // The editor loads exactly one locale at a time; youproof.defaultLocale (else the
   // first configured locale) on startup, switched by the per-locale reload buttons (see the reloadModel handler).
   let activeLocale: string | null = null;
+  let displayTemplates: DisplayTemplates | null = null;
 
   function reloadServices(): ServicesData {
     services = null;
@@ -41,6 +46,22 @@ export function activate(context: vscode.ExtensionContext): void {
     return services ?? reloadServices();
   }
 
+  function reloadDisplayTemplates(): DisplayTemplates {
+    const { localeConfig, entityLabels } = getServices();
+    const loaded = readDisplayTemplates(
+      resolveContentRoot(context), activeLocale ?? localeConfig.defaultLocale, entityLabels, localeConfig.locales,
+    );
+    const problem = describeDisplayTemplateErrors(loaded);
+    if (problem) vscode.window.showErrorMessage(problem);
+    displayTemplates = loaded;
+    return loaded;
+  }
+
+  function getDisplayTemplates(): DisplayTemplates {
+    const locale = activeLocale ?? getServices().localeConfig.defaultLocale;
+    return displayTemplates?.locale === locale ? displayTemplates : reloadDisplayTemplates();
+  }
+
   function getContent(): LoadedContent {
     if (!contentCache) {
       const { localeConfig } = getServices();
@@ -53,10 +74,26 @@ export function activate(context: vscode.ExtensionContext): void {
   if (contentRootSet) {
     try {
       reloadServices();
+      reloadDisplayTemplates();
     } catch (err) {
       if (err instanceof ServicesDataError) vscode.window.showErrorMessage(err.message);
       else throw err;
     }
+    watchDisplayTemplates();
+  }
+
+  function watchDisplayTemplates(): void {
+    const dir = vscode.Uri.file(path.join(resolveContentRoot(context), DISPLAY_TEMPLATES_DIR));
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(dir, 'display-templates.*.yaml'));
+    const onChange = (uri: vscode.Uri): void => {
+      if (!services) return;
+      const locale = activeLocale ?? services.localeConfig.defaultLocale;
+      if (uri.fsPath === displayTemplatesFile(resolveContentRoot(context), locale)) reloadDisplayTemplates();
+    };
+    watcher.onDidChange(onChange);
+    watcher.onDidCreate(onChange);
+    watcher.onDidDelete(onChange);
+    context.subscriptions.push(watcher);
   }
 
   const panelManager = new PanelManager(context, server, (nodeId) => {
@@ -72,12 +109,18 @@ export function activate(context: vscode.ExtensionContext): void {
     context,
     getContent,
     getServices,
-    reloadServices,
+    reloadServices:    () => {
+      displayTemplates = null;
+      return reloadServices();
+    },
     getSelectedId:     () => selectedId,
     setSelectedId:     (id) => { selectedId = id; },
     resetContentCache: () => { contentCache = null; },
     getActiveLocale:   () => activeLocale ?? getServices().localeConfig.defaultLocale,
-    setActiveLocale:   (l) => { activeLocale = l; },
+    setActiveLocale:   (l) => {
+      activeLocale = l;
+      getDisplayTemplates();
+    },
   });
 
   context.subscriptions.push(
