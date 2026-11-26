@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useClient } from '../shared/clientContext';
 import { getAllBlocksText, sortByOccurrence } from './bracketScan';
 import { SelectionContext } from './contexts/SelectionContext';
 import { useContentObjectDraft } from './hooks/useContentObjectDraft';
@@ -11,10 +12,17 @@ import TermEditingProvider from './TermEditingProvider';
 import EntityHeader from './EntityHeader';
 import EntityBody from './EntityBody';
 import EditorTabs from './EditorTabs';
+import { ReferenceDisplayStore, ReferenceDisplaysContext } from './referenceDisplays';
 
 interface Props { nodeId: string; }
 
 export default function NodeView({ nodeId }: Props) {
+  const client = useClient();
+  const [referenceDisplays] = useState(() => {
+    const store = new ReferenceDisplayStore(client, nodeId);
+    client.onNotification('referenceDisplaysChanged', () => store.refresh());
+    return store;
+  });
   const { selectedId, setSelectedId, handleSelectId, handleSelectBlock } = useEntitySelection(nodeId);
   const {
     draft, setDraft, draftRef,
@@ -40,6 +48,7 @@ export default function NodeView({ nodeId }: Props) {
 
   return (
     <SelectionContext.Provider value={selectionCtx}>
+    <ReferenceDisplaysContext.Provider value={referenceDisplays}>
     <TermEditingProvider setDraft={setDraft} draftRef={draftRef} markDirty={markDirty}>
     <BracketEditingProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
     <TargetSelectionProvider setDraft={setDraft} setTargetObjects={setTargetObjects} markDirty={markDirty} targetObjects={targetObjects}>
@@ -68,6 +77,7 @@ export default function NodeView({ nodeId }: Props) {
     </TargetSelectionProvider>
     </BracketEditingProvider>
     </TermEditingProvider>
+    </ReferenceDisplaysContext.Provider>
     </SelectionContext.Provider>
   );
 }

@@ -27,6 +27,9 @@ export interface EndSelectTargetRequest       { targetId: string | null; }
 export interface OpenExternalUrlRequest                  { url: string; }
 export interface GetSelfReferenceDisplaySuggestionsRequest  { /* empty */ }
 export interface GetSelfReferenceDisplaySuggestionsResponse { suggestions: string[]; }
+/** Render held reference tokens, named by their payloads, as they render in the file `id`. */
+export interface ResolveReferenceTokensRequest { id: string; payloads: string[]; }
+export interface ResolveReferenceTokensResponse { displays: Record<string, ReferenceTokenDisplay>; }
 
 interface SaveObjectBase { id: string; }
 
@@ -64,6 +67,18 @@ export interface GetContentObjectResponse {
   contentObject: ContentObjectData;
   targetObjects: Record<string, ContentTargetObject>;
 }
+
+// ─── Reference displays ────────────────────────────────────────────────────────
+
+/** A piece of a rendered reference: plain words, or a link to the target named by its fully qualified name or URL. */
+export type ReferenceTokenSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'link'; text: string; target: string };
+
+/** A reference as the site renders it, before sentence-start capitalization, or why the site can't render it. */
+export type ReferenceTokenDisplay =
+  | { segments: ReferenceTokenSegment[]; error?: undefined }
+  | { segments?: undefined; error: string };
 
 // ─── Content block types ───────────────────────────────────────────────────────
 

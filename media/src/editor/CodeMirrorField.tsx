@@ -5,6 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Range } from '@codemirror/state';
 import { maskFormulas } from '../shared/formula';
 import { isInReferenceToken, referenceTokens } from './referenceTokens';
+import { useReferenceDisplays } from './referenceDisplays';
 import { useBracketEditingContext } from './contexts/BracketEditingContext';
 import { useTermEditingContext } from './contexts/TermEditingContext';
 import type { BracketInfo, RenameEvent } from './contexts/BracketEditingContext';
@@ -16,6 +17,8 @@ interface Props {
   bracketAutocomplete?: boolean;
   onSpecialKey?: (key: 'Enter' | 'Backspace' | 'Delete') => boolean;
   allowSelfReference?: boolean;
+  /** False for a field the site reads no references from, where a reference shows as an error. */
+  readsReferences?: boolean;
 }
 
 const ExternalUpdate    = Annotation.define<boolean>();
@@ -91,6 +94,13 @@ const vsCodeTheme = EditorView.theme({
   '.cm-yp-formula': { color: '#dcdcaa' },
   '.cm-yp-term':    { color: '#c8a832' },
   '.cm-yp-ref':     { color: '#9b72d0' },
+  '.cm-yp-ref-link': { textDecoration: 'underline', textUnderlineOffset: '2px' },
+  '.cm-yp-ref-pending': { opacity: '0.6' },
+  '.cm-yp-ref-error': {
+    color: 'var(--vscode-errorForeground, #f48771)',
+    textDecoration: 'wavy underline',
+    textDecorationColor: 'var(--vscode-editorError-foreground, #f14c4c)',
+  },
 });
 
 function escapeRegex(s: string): string {
@@ -215,7 +225,7 @@ export interface CodeMirrorFieldHandle {
 }
 
 const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMirrorField(
-  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false }, ref,
+  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false, readsReferences = true }, ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef      = useRef<EditorView | null>(null);
@@ -227,6 +237,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
   allowSelfRefRef.current = allowSelfReference;
   const ctx = useBracketEditingContext();
   const termCtx = useTermEditingContext();
+  const referenceDisplays = useReferenceDisplays();
 
   useImperativeHandle(ref, () => ({
     focus: () => viewRef.current?.focus(),
@@ -384,7 +395,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
           bracketDeleteKeymap,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           vsCodeTheme,
-          referenceTokens(),
+          referenceTokens({ displays: referenceDisplays, readsReferences }),
           ...(bracketAutocomplete ? [syntaxPlugin] : []),
           EditorView.lineWrapping,
           transactionFilter,

@@ -265,15 +265,20 @@ function asYamlBlocks(blocks: unknown): unknown[] {
   });
 }
 
+/** The text fields of a content object that the site reads references from, in the order it renders them. */
+export function heldReferenceTexts(obj: Record<string, unknown>): string[] {
+  const kind = referenceFileKind(String(obj['type']));
+  const file = Object.fromEntries(REFERENCE_TEXT_FIELDS[kind].map((field) => [field, asYamlBlocks(obj[MODEL_FIELDS[field]])]));
+  return fileReferenceTexts(file, kind);
+}
+
 /**
  * The references a content object's text holds now, in the order the site reads
  * them, each as its list item: the list a save would write. Tokens a save would
  * refuse are left out.
  */
 export function heldReferences(obj: Record<string, unknown>): unknown[] {
-  const kind = referenceFileKind(String(obj['type']));
-  const file = Object.fromEntries(REFERENCE_TEXT_FIELDS[kind].map((field) => [field, asYamlBlocks(obj[MODEL_FIELDS[field]])]));
-  return fileReferenceTexts(file, kind).flatMap((text) =>
+  return heldReferenceTexts(obj).flatMap((text) =>
     readHeldTokens(text).read.flatMap((token) => ('item' in token && token.item !== undefined ? [token.item] : [])));
 }
 

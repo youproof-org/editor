@@ -1,31 +1,126 @@
-import { EditorSelection, EditorState, StateField, Transaction, type ChangeSpec, type Extension, type SelectionRange } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType, type DecorationSet } from '@codemirror/view';
+import {
+  EditorSelection, EditorState, StateEffect, StateField, Transaction, type ChangeSpec, type Extension, type SelectionRange,
+} from '@codemirror/state';
+import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view';
+import { capitalizeSegments } from '@youproof.org/display-templates';
 import { findReferenceTokens, referenceTokenLabel, type ReferenceTokenMatch } from '../shared/referenceToken';
+import { referencePlacements, type ReferencePlacement } from '../shared/referencePlacement';
+import type { ReferenceTokenDisplay } from '../shared/types';
+import type { ReferenceDisplaySource } from './referenceDisplays';
+
+/** What a token shows: its rendered display, or its name while it renders or when it can't. */
+export interface ReferenceTokenView {
+  state: 'rendered' | 'pending' | 'error';
+  /** The words, each link marked with its target. */
+  parts: { text: string; target?: string }[];
+  /** Why the token is in its error state. */
+  reason?: string;
+}
+
+const named = (state: ReferenceTokenView['state'], item: unknown, reason?: string): ReferenceTokenView =>
+  ({ state, parts: [{ text: referenceTokenLabel(item) }], ...(reason ? { reason } : {}) });
+
+/**
+ * What a token shows where it sits: the display the host rendered, capitalized
+ * where the site starts a sentence with it, or an error where the site wouldn't
+ * render it.
+ */
+export function referenceTokenView(
+  token: Pick<ReferenceTokenMatch, 'item'>,
+  placement: ReferencePlacement,
+  display: ReferenceTokenDisplay | undefined,
+  readsReferences = true,
+): ReferenceTokenView {
+  if (token.item === undefined) return named('error', token.item, 'This reference is damaged and can\'t be read.');
+  if (!readsReferences) {
+    return named('error', token.item, 'The site reads no references in this field, so it can\'t be saved here. Move it to the text.');
+  }
+  if (!placement.read) {
+    return named('error', token.item, 'The site doesn\'t read a reference inside $...$ or ^...^, so it can\'t be saved here. Move it out.');
+  }
+  if (!display) return named('pending', token.item);
+  if (display.error !== undefined) return named('error', token.item, display.error);
+  const segments = placement.sentenceStart ? capitalizeSegments(display.segments) : display.segments;
+  return {
+    state: 'rendered',
+    parts: segments.filter((segment) => segment.text !== '' || segment.kind === 'link')
+      .map((segment) => (segment.kind === 'link' ? { text: segment.text, target: segment.target } : { text: segment.text })),
+  };
+}
+
+/** The view as plain text, each link in brackets. */
+export function referenceTokenText(view: ReferenceTokenView): string {
+  return view.parts.map((part) => (part.target === undefined ? part.text : `[${part.text}]`)).join('');
+}
 
 class ReferenceWidget extends WidgetType {
-  constructor(readonly label: string) { super(); }
-  eq(other: ReferenceWidget): boolean { return other.label === this.label; }
+  private readonly key: string;
+  constructor(readonly view: ReferenceTokenView) {
+    super();
+    this.key = JSON.stringify(view);
+  }
+  eq(other: ReferenceWidget): boolean { return other.key === this.key; }
   toDOM(): HTMLElement {
     const span = document.createElement('span');
-    span.className = 'cm-yp-ref';
-    span.textContent = `[${this.label}]`;
+    span.className = `cm-yp-ref cm-yp-ref-${this.view.state}`;
+    if (this.view.reason) span.title = this.view.reason;
+    if (this.view.state !== 'rendered') {
+      span.textContent = `[${this.view.parts.map((part) => part.text).join('')}]`;
+      return span;
+    }
+    for (const part of this.view.parts) {
+      if (part.target === undefined) {
+        span.append(part.text);
+      } else {
+        const link = document.createElement('span');
+        link.className = 'cm-yp-ref-link';
+        link.title = part.target;
+        link.textContent = `[${part.text}]`;
+        span.append(link);
+      }
+    }
     return span;
   }
 }
 
-function tokenDecorations(state: EditorState): DecorationSet {
-  return Decoration.set(findReferenceTokens(state.doc.toString()).map((token) =>
-    Decoration.replace({ widget: new ReferenceWidget(referenceTokenLabel(token.item)) }).range(token.from, token.to)));
+export interface ReferenceTokenOptions {
+  /** Where the rendered displays come from. Without one, each token shows its name. */
+  displays?: ReferenceDisplaySource | null;
+  /** Whether the site reads references from this field. */
+  readsReferences?: boolean;
 }
 
-const referenceTokenField = StateField.define<DecorationSet>({
-  create: tokenDecorations,
-  update: (decorations, tr) => (tr.docChanged ? tokenDecorations(tr.state) : decorations),
-  provide: (field) => [
-    EditorView.decorations.from(field),
-    EditorView.atomicRanges.of((view) => view.state.field(field)),
-  ],
-});
+const displaysChanged = StateEffect.define<null>();
+
+function tokenDecorations(state: EditorState, options: ReferenceTokenOptions): DecorationSet {
+  const text = state.doc.toString();
+  const placements = referencePlacements(text);
+  return Decoration.set(findReferenceTokens(text).map((token, i) => {
+    const display = token.item === undefined ? undefined : options.displays?.get(token.payload);
+    const view = referenceTokenView(token, placements[i], display, options.readsReferences);
+    return Decoration.replace({ widget: new ReferenceWidget(view) }).range(token.from, token.to);
+  }));
+}
+
+function referenceTokenField(options: ReferenceTokenOptions) {
+  return StateField.define<DecorationSet>({
+    create: (state) => tokenDecorations(state, options),
+    update: (decorations, tr) => (tr.docChanged || tr.effects.some((effect) => effect.is(displaysChanged))
+      ? tokenDecorations(tr.state, options)
+      : decorations),
+    provide: (field) => [
+      EditorView.decorations.from(field),
+      EditorView.atomicRanges.of((view) => view.state.field(field)),
+    ],
+  });
+}
+
+function rerenderOnDisplayChange(source: ReferenceDisplaySource): Extension {
+  return ViewPlugin.define((view) => {
+    const unsubscribe = source.subscribe(() => view.dispatch({ effects: displaysChanged.of(null) }));
+    return { destroy: unsubscribe };
+  });
+}
 
 const strictlyInside = (pos: number, token: ReferenceTokenMatch): boolean => token.from < pos && pos < token.to;
 
@@ -87,9 +182,14 @@ const keepTokensWhole = EditorState.transactionFilter.of((tr) => {
 
 /**
  * Show each reference token the text holds as one atomic unit, so the caret steps
- * over it and Backspace or Delete removes it whole. Until references render inline,
- * it shows as its literal text or its template's name.
+ * over it and Backspace or Delete removes it whole. It shows the reference as the
+ * site renders it, with each link in brackets, rendered again when the displays
+ * change and wherever the token moves, since the start of a sentence capitalizes it.
  */
-export function referenceTokens(): Extension {
-  return [referenceTokenField, keepTokensWhole];
+export function referenceTokens(options: ReferenceTokenOptions = {}): Extension {
+  return [
+    referenceTokenField(options),
+    keepTokensWhole,
+    ...(options.displays ? [rerenderOnDisplayChange(options.displays)] : []),
+  ];
 }

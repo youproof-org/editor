@@ -7,7 +7,8 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const {
-  EditorState, EditorSelection, history, undo, redo, referenceTokens, isInReferenceToken, encodeReferenceToken, findReferenceTokens,
+  EditorState, EditorSelection, EditorView, history, undo, redo, referenceTokens, referenceTokenText, isInReferenceToken,
+  encodeReferenceToken, findReferenceTokens,
 } = require('../out/test/webview.js')
 
 const A = { text: '[a]', target: 'definitions.a' }
@@ -84,4 +85,33 @@ test('a copied token pasted elsewhere is a second, independent reference', () =>
   const [first] = findReferenceTokens(state.doc.toString())
   state = state.update({ changes: { from: first.from, to: first.to }, userEvent: 'delete' }).state
   assert.deepEqual(items(state), [A], 'deleting the original leaves the copy')
+})
+
+function shown(state) {
+  const views = []
+  for (const source of state.facet(EditorView.decorations)) {
+    const set = typeof source === 'function' ? null : source
+    set?.between(0, state.doc.length, (_from, _to, decoration) => { views.push(decoration.spec.widget.view) })
+  }
+  return views
+}
+
+test('a token shows the display its source has for it, and capitalizes it again wherever it moves', () => {
+  const display = { segments: [{ kind: 'text', text: 'a ' }, { kind: 'link', text: 'tétel', target: 'theorems.t' }] }
+  const asked = []
+  const displays = { get: (payload) => { asked.push(payload); return display }, subscribe: () => () => {} }
+  let state = EditorState.create({ doc: `Lásd ${tokenA}.`, extensions: [referenceTokens({ displays })] })
+  assert.deepEqual(asked, [findReferenceTokens(tokenA)[0].payload])
+  assert.deepEqual(shown(state).map(referenceTokenText), ['a [tétel]'])
+  state = state.update({ changes: { from: 0, to: 5 } }).state
+  assert.deepEqual(shown(state).map(referenceTokenText), ['A [tétel]'], 'now at the start of the text')
+  state = state.update({ changes: { from: 0, insert: '$x ' }, selection: { anchor: 0 } }).state
+  state = state.update({ changes: { from: state.doc.length, insert: '$' } }).state
+  assert.equal(shown(state)[0].state, 'error', 'inside $...$ the site reads no reference')
+})
+
+test('a field the site reads no references from shows its tokens as errors', () => {
+  const displays = { get: () => ({ segments: [{ kind: 'link', text: 'x', target: 't' }] }), subscribe: () => () => {} }
+  const state = EditorState.create({ doc: tokenA, extensions: [referenceTokens({ displays, readsReferences: false })] })
+  assert.match(shown(state)[0].reason, /reads no references in this field/)
 })

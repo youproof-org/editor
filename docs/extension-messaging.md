@@ -165,9 +165,37 @@ interface ContentTargetObject {
 
 `ContentBlock` is a discriminated union of 11 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`.
 
-A content object carries no separate references. Each reference is held in the text, in the token that cites it: on load, the host reads the file's `references` list with the site build's reader (`readReferences` in `@youproof.org/display-templates`) and turns each `[i]` into `[@<payload>]`, where the payload is the item, as YAML parses it, in base64url JSON (`src/protocol/referenceToken.ts`). The text fields travel to the webview and back with these tokens in them, so whatever moves, copies or deletes text does the same to its references. The webview shows each token as one atomic unit (`media/src/editor/referenceTokens.ts`). A `[i]` the site doesn't read as a reference, such as one inside `$...$` or in a formula's `content`, stays as it is.
+A content object carries no separate references. Each reference is held in the text, in the token that cites it: on load, the host reads the file's `references` list with the site build's reader (`readReferences` in `@youproof.org/display-templates`) and turns each `[i]` into `[@<payload>]`, where the payload is the item, as YAML parses it, in base64url JSON (`src/protocol/referenceToken.ts`). The text fields travel to the webview and back with these tokens in them, so whatever moves, copies or deletes text does the same to its references. The webview shows each token as one atomic unit, rendered as the site renders it (`media/src/editor/referenceTokens.ts`); the host renders it on request, see [`resolveReferenceTokens`](#resolvereferencetokens). A `[i]` the site doesn't read as a reference, such as one inside `$...$` or in a formula's `content`, stays as it is.
 
 A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a term, `name` is the English id a reference resolves against and `slug` is the localized anchor segment, `''` when the file has none — legal content, since the site falls back to `name`. A save is refused if a non-empty slug is not lowercase kebab-case, or if two claims (or two terms) on one node resolve to the same anchor.
+
+---
+
+### `resolveReferenceTokens`
+
+**Direction:** editor panel → extension host  
+**Caller:** `ReferenceDisplayStore` (`media/src/editor/referenceDisplays.ts`), for the tokens its fields show that it has no display for yet, batched per turn, and for all of them again on a `referenceDisplaysChanged` notification  
+**Params:** `{ id: string; payloads: string[] }`: the panel's content object, and the payloads of the tokens to render (the part of `[@<payload>]` between `[@` and `]`)  
+**Result:** `{ displays: Record<string, ReferenceTokenDisplay> }`, one entry per payload
+
+```typescript
+type ReferenceTokenSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'link'; text: string; target: string };   // target: the fully qualified name, or the URL of an external target
+
+type ReferenceTokenDisplay =
+  | { segments: ReferenceTokenSegment[] }
+  | { error: string };
+```
+
+The host renders each token as the site renders its reference in a file of the object's locale (`src/content/referenceDisplays.ts`):
+
+1. It decodes the payload and reads the item with the site build's reader (`readReferences`), against the loaded locale's display templates. Anything the reader rejects, such as an unknown template, a target type the template doesn't take or a target count outside its `count`, is the error.
+2. It resolves the item with the shared resolution (`resolveReference` in `@youproof.org/display-templates`) against the editor's numbering of the loaded content. For a `display` item, a target the numbering can't vouch for, because content the editor is missing could change its number, is an error instead of a number (`resolveEditorReference` in `src/content/numbering.ts`).
+
+When the entity label registry couldn't be read, every display is that error. The segments are not capitalized: the webview capitalizes a reference where the site starts a sentence with it, which depends on the text around the token (`src/protocol/referencePlacement.ts`).
+
+The webview shows a rendered token in purple, each link segment in brackets and underlined, with the link's target on hover. A token shows its template name or literal text dimmed while its display is on its way, and in an error state, with the reason on hover, when the host returns an error, when the token sits where the site reads no reference (inside `$...$` or `^...^`, or in a field such as a formula's `content`), or when its payload can't be decoded. None of this changes what a save refuses.
 
 ---
 
@@ -286,6 +314,21 @@ Notifications flow from the extension host to all registered webviews. The clien
 **Subscribers:**
 - `App.tsx` (sidebar) — sets `selectedId` and expands ancestors to highlight the node, with no follow-up request
 - `NodeView.tsx` (editor panels) — sets `selectedId` directly, with no follow-up request
+
+---
+
+---
+
+### `referenceDisplaysChanged`
+
+**Direction:** extension host → all webviews (broadcast via `MessageServer.notify()`)  
+**Triggers:** `src/extension.ts`, whenever what a reference renders as may have changed:
+- the display template collection is read again, including when its file changes on disk
+- a save changes the in-memory model, which can renumber the content
+- the content cache is reset, as `reloadModel` does
+
+**Params:** `{}`  
+**Subscribers:** `NodeView.tsx` (editor panels), which asks for every display its panel holds again with `resolveReferenceTokens`. A token keeps its old display until the new one arrives.
 
 ---
 

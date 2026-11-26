@@ -68,7 +68,7 @@ export default function ClaimBlock({ block, onBlockChange }: Props) {
           onChange={v => onBlockChange({ ...block, content: v })} />
       </Field>
       <Field label="Formula">
-        <CodeMirrorField value={block.formula ?? ''} multiline
+        <CodeMirrorField value={block.formula ?? ''} multiline readsReferences={false}
           onChange={v => onBlockChange({ ...block, formula: v })} />
       </Field>
     </div>

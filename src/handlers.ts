@@ -16,6 +16,8 @@ import {
   describeSavedReferenceProblems, heldReferences, numberReferences, referenceFileKind, referencesSectionFor,
 } from './content/references';
 import { referenceTokenLabel } from './protocol/referenceToken';
+import type { ReferenceResolution } from './content/numbering';
+import { resolveReferenceTokens } from './content/referenceDisplays';
 import { getLocales } from './content/locales';
 import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
 import type {
@@ -35,6 +37,8 @@ import type {
   EndSelectTargetRequest,
   OpenExternalUrlRequest,
   GetSelfReferenceDisplaySuggestionsResponse,
+  ResolveReferenceTokensRequest,
+  ResolveReferenceTokensResponse,
   GetContentTreeResponse,
   GetContentObjectResponse,
   ReloadModelResponse,
@@ -59,13 +63,16 @@ export interface HandlerContext {
   setActiveLocale:   (locale: string) => void;
   /** The loaded locale's display templates, which a save checks the file's references against. */
   getDisplayTemplates: () => DisplayTemplateCollection;
+  /** What rendering a reference needs, or why references can't be rendered now. */
+  getReferenceResolution: () => ReferenceResolution | string;
 }
 
 // ─── Handler registration ─────────────────────────────────────────────────────
 
 export function registerHandlers(ctx: HandlerContext): void {
   const { server, panelManager, getContent, getServices, reloadServices, getSelectedId, setSelectedId,
-          resetContentCache, contentChanged, getActiveLocale, setActiveLocale, getDisplayTemplates } = ctx;
+          resetContentCache, contentChanged, getActiveLocale, setActiveLocale, getDisplayTemplates,
+          getReferenceResolution } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
@@ -342,6 +349,17 @@ export function registerHandlers(ctx: HandlerContext): void {
       .sort((a, b) => b[1] - a[1])
       .map(([s]) => s);
     return { suggestions };
+  });
+
+  server.onRequest('resolveReferenceTokens', async (params): Promise<ResolveReferenceTokensResponse> => {
+    const p = params as ResolveReferenceTokensRequest;
+    const obj = getContent().idToObject.get(p.id) as Record<string, unknown> | undefined;
+    if (!obj) throw new Error(`Object not found: ${p.id}`);
+    const resolution = getReferenceResolution();
+    if (typeof resolution === 'string') {
+      return { displays: Object.fromEntries(p.payloads.map((payload) => [payload, { error: resolution }])) };
+    }
+    return { displays: resolveReferenceTokens(p.payloads, String(obj['locale'] ?? getActiveLocale()), resolution) };
   });
 
   server.onRequest('openExternalUrl', async (params) => {

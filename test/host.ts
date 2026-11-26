@@ -6,3 +6,5 @@ export * from '../src/content/references';
 export * from '../src/protocol/referenceToken';
 export { fileReferenceTexts, inlineTokens } from '@youproof.org/display-templates';
 export * from '../src/content/numbering';
+export * from '../src/content/referenceDisplays';
+export * from '../src/protocol/referencePlacement';

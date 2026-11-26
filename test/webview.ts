@@ -1,4 +1,7 @@
-export { isInReferenceToken, referenceTokens } from '../media/src/editor/referenceTokens';
+export { isInReferenceToken, referenceTokens, referenceTokenText, referenceTokenView } from '../media/src/editor/referenceTokens';
+export { ReferenceDisplayStore } from '../media/src/editor/referenceDisplays';
 export { EditorSelection, EditorState } from '@codemirror/state';
+export { EditorView } from '@codemirror/view';
 export { history, redo, undo } from '@codemirror/commands';
 export { encodeReferenceToken, findReferenceTokens } from '../src/protocol/referenceToken';
+export { referencePlacements } from '../src/protocol/referencePlacement';

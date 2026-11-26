@@ -9,7 +9,7 @@ import { readServicesData, ServicesDataError, type ServicesData } from './conten
 import {
   describeDisplayTemplateErrors, DISPLAY_TEMPLATES_DIR, displayTemplatesFile, readDisplayTemplates, type DisplayTemplates,
 } from './content/displayTemplates';
-import { describeNumberingProblems, numberContent } from './content/numbering';
+import { describeNumberingProblems, numberContent, type ContentNumbering, type ReferenceResolution } from './content/numbering';
 import { describeLoadedReferenceProblems } from './content/references';
 import type { LoadedContent } from './content/model';
 import { registerHandlers, resolveContentRoot, resolveServicesRootSetting } from './handlers';
@@ -26,6 +26,11 @@ export function activate(context: vscode.ExtensionContext): void {
   let activeLocale: string | null = null;
   let displayTemplates: DisplayTemplates | null = null;
   let reportedNumberingProblems: string | undefined;
+  let numbering: ContentNumbering | null = null;
+
+  function referenceDisplaysChanged(): void {
+    server.notify('referenceDisplaysChanged', {});
+  }
 
   function reloadServices(): ServicesData {
     services = null;
@@ -57,6 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const problem = describeDisplayTemplateErrors(loaded);
     if (problem) vscode.window.showErrorMessage(problem);
     displayTemplates = loaded;
+    referenceDisplaysChanged();
     return loaded;
   }
 
@@ -77,10 +83,23 @@ export function activate(context: vscode.ExtensionContext): void {
     return contentCache;
   }
 
+  function getNumbering(): ContentNumbering {
+    const content = getContent();
+    numbering ??= numberContent(content);
+    return numbering;
+  }
+
+  function getReferenceResolution(): ReferenceResolution | string {
+    const { entityLabels } = getServices();
+    if (!entityLabels) return 'The entity label registry could not be read, so references can\'t be rendered until it is fixed.';
+    return { numbering: getNumbering(), templates: getDisplayTemplates().collection, labels: entityLabels };
+  }
+
   // Shown when the problems change, so a save that leaves them as they were
   // doesn't show them again; a reload always does.
   function reportNumberingProblems(content: LoadedContent): void {
-    const problem = describeNumberingProblems(numberContent(content).problems);
+    numbering = numberContent(content);
+    const problem = describeNumberingProblems(numbering.problems);
     if (problem && problem !== reportedNumberingProblems) vscode.window.showErrorMessage(problem);
     reportedNumberingProblems = problem;
   }
@@ -142,15 +161,22 @@ export function activate(context: vscode.ExtensionContext): void {
     setSelectedId:     (id) => { selectedId = id; },
     resetContentCache: () => {
       contentCache = null;
+      numbering = null;
       reportedNumberingProblems = undefined;
+      referenceDisplaysChanged();
     },
-    contentChanged:    () => { if (contentCache) reportNumberingProblems(contentCache); },
+    contentChanged:    () => {
+      numbering = null;
+      if (contentCache) reportNumberingProblems(contentCache);
+      referenceDisplaysChanged();
+    },
     getActiveLocale:   () => activeLocale ?? getServices().localeConfig.defaultLocale,
     setActiveLocale:   (l) => {
       activeLocale = l;
       getDisplayTemplates();
     },
     getDisplayTemplates: () => getDisplayTemplates().collection,
+    getReferenceResolution,
   });
 
   context.subscriptions.push(

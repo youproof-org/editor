@@ -36,6 +36,8 @@ export function decodeReferencePayload(payload: string): unknown {
 export interface ReferenceTokenMatch {
   from: number;
   to: number;
+  /** The token's encoded item, which names the reference while it is held. */
+  payload: string;
   /** The item, or undefined when the payload can't be decoded. */
   item: unknown;
 }
@@ -50,12 +52,12 @@ export function findReferenceTokens(text: string): ReferenceTokenMatch[] {
     } catch {
       item = undefined;
     }
-    found.push({ from: match.index!, to: match.index! + match[0].length, item });
+    found.push({ from: match.index!, to: match.index! + match[0].length, payload: match[1], item });
   }
   return found;
 }
 
-/** A short name for a token until references render inline: its literal text, or its template's name. */
+/** A short name for a reference where it isn't rendered: its literal text, or its template's name. */
 export function referenceTokenLabel(item: unknown): string {
   if (item && typeof item === 'object' && !Array.isArray(item)) {
     const { text, display } = item as Record<string, unknown>;

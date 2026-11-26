@@ -15,7 +15,7 @@ export default function FormulaBlock({ block, onBlockChange }: Props) {
           onChange={v => onBlockChange({ ...block, leadIn: v })} />
       </Field>
       <Field label="Content">
-        <CodeMirrorField value={block.content} multiline
+        <CodeMirrorField value={block.content} multiline readsReferences={false}
           onChange={v => onBlockChange({ ...block, content: v })} />
       </Field>
       <Field label="Lead-out">
