@@ -7,7 +7,7 @@ import {
   resolveReference, type DisplayTemplateCollection, type ReferenceDisplay, type ReferenceItem,
 } from '@youproof.org/display-templates';
 import type {
-  ContentBlock, Definition, FileReferences, LoadedContent, LoadProblem, Namespace, Proof, Remark,
+  ContentBlock, Definition, LoadedContent, LoadProblem, Namespace, Proof, Remark,
   NumberingScope, Theorem,
 } from './model';
 
@@ -229,11 +229,13 @@ export function resolveEditorReference(item: ReferenceItem, locale: string, reso
   });
 }
 
-/** Every item of a file's `references` list resolved, in list order, so `[i]` is the i-th. */
-export function resolveFileReferences(references: FileReferences, locale: string, resolution: ReferenceResolution): ReferenceDisplay[] {
-  return references.entries.map((entry) => entry.item
-    ? resolveEditorReference(entry.item, locale, resolution)
-    : { error: `reference [${entry.index}] can't be read; the site build reports why` });
+/** Every reference resolved, in the order given, so the i-th is what `[i]` shows once saved. */
+export function resolveFileReferences(
+  items: readonly (ReferenceItem | undefined)[], locale: string, resolution: ReferenceResolution,
+): ReferenceDisplay[] {
+  return items.map((item, index) => item
+    ? resolveEditorReference(item, locale, resolution)
+    : { error: `reference [${index}] can't be read; the site build reports why` });
 }
 
 const SHOWN_PROBLEMS = 5;

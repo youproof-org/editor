@@ -37,6 +37,7 @@ const {
   serializeBlocks, updateModelBlocks,
   loadContent,
   referencesSection,
+  heldReferences, heldReferenceItems, findReferenceTokens,
 } = await import('../out/test/host.js')
 
 const NS = 'namespace.yaml'
@@ -494,22 +495,19 @@ test('the references list and its tokens are written back byte for byte', () => 
   }
 })
 
-test('each item is read as the site reads it, with its targets resolved against the loaded content', () => {
+test('each token holds the item it cites, and the text holds no index', () => {
   const content = loadContent(fixture(), 'hu')
-  const { entries, tokens, isDictionary } = chapterOf(content).references
-  assert.equal(isDictionary, false)
-  assert.deepEqual(tokens, [0, 1, 2, 3, 4, 5, 6, 7, 8])
-  assert.deepEqual(entries.map((e) => e.index), [0, 1, 2, 3, 4, 5, 6, 7, 8])
-  assert.deepEqual(entries[0].item, { text: '[definíció]', targets: [{
+  const chapter = chapterOf(content)
+  const file = doc(readFileSync(chapter.filePath, 'utf8'))
+  assert.equal(chapter.references.isDictionary, false)
+  assert.deepEqual(chapter.references.saved, file.references)
+  assert.deepEqual(heldReferences(chapter), file.references)
+  assert.deepEqual(heldReferenceItems(chapter)[0], { text: '[definíció]', targets: [{
     type: 'definition', name: 'proba-definicio', fqn: 'definitions.proba-definicio', parentFqn: '', parentKind: null,
   }] })
-  const kinds = entries.map((e) => e.targets.map((t) => t.type))
-  assert.deepEqual(kinds, [['definition'], ['claim'], ['proof'], ['remark'], ['term'], ['unresolved'], ['book'], ['external'], ['external']])
-  for (const entry of entries.slice(0, 5)) {
-    assert.equal(content.idToObject.get(entry.targets[0].target)?.name, entry.item.targets[0].name, `[${entry.index}]`)
-  }
-  assert.equal(entries[5].targets[0].fqn, 'pages.impresszum', 'a target the editor does not model keeps its path')
-  assert.equal(entries[8].targets[0].target, 'mailto:hello@youproof.org')
+  const text = chapter.prologue[0].content
+  assert.doesNotMatch(text, /\[\d+\]/)
+  assert.deepEqual(findReferenceTokens(text).map((t) => t.item), file.references)
 })
 
 test('tokens are read in the order the site renders the text, through a figure caption, a quote and a details title', () => {
@@ -548,7 +546,9 @@ body:
   const before = readFileSync(sectionFile, 'utf8')
   const content = loadContent(root, 'hu')
   const id = content.filePathToId.get(sectionFile)
-  assert.deepEqual(content.idToObject.get(id).references.tokens, [0, 1, 2, 3, 4, 5])
+  const section = content.idToObject.get(id)
+  assert.deepEqual(heldReferences(section), doc(before).references)
+  assert.match(section.body[0].content, /\$\[0\]_3\$/, 'an index inside $...$ stays as it is')
   saveFromModel(id, content)
   const after = readFileSync(sectionFile, 'utf8')
   assert.equal(referencesSection(after), referencesSection(before))
@@ -564,8 +564,8 @@ test('an item the reader cannot read is kept in the list, and saving keeps it', 
   const before = readFileSync(file, 'utf8')
   const content = loadContent(root, 'hu')
   const chapter = chapterOf(content)
-  assert.equal(chapter.references.entries.length, 10)
-  assert.equal(chapter.references.entries[9].item, undefined, 'neither display nor text')
+  assert.equal(heldReferences(chapter).length, 10)
+  assert.equal(heldReferenceItems(chapter)[9], undefined, 'neither display nor text')
   saveFromModel(chapter.id, content)
   assert.equal(referencesSection(readFileSync(file, 'utf8')), referencesSection(before))
 })
@@ -591,7 +591,8 @@ sections: []
   const content = loadContent(root, 'hu')
   const chapter = chapterOf(content)
   assert.equal(chapter.references.isDictionary, true)
-  assert.deepEqual(chapter.references.entries, [])
+  assert.deepEqual(heldReferences(chapter), [])
+  assert.equal(chapter.prologue[0].content, 'Lásd [a-definition].', 'a token of the dictionary stays as it is')
   assert.throws(() => saveFromModel(chapter.id, content), /still has a 'references' dictionary/)
   assert.equal(readFileSync(file, 'utf8'), before, 'nothing was written')
 })

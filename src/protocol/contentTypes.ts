@@ -10,7 +10,6 @@ export interface ContentTreeItem {
   type: NodeType | 'group' | 'reference' | 'term' | 'claim';
   label: string;
   isFileBacked: boolean;
-  targetId?: string;
   children: ContentTreeItem[];
 }
 

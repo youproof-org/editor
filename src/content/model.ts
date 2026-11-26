@@ -1,5 +1,3 @@
-import type { ReferenceItem } from '@youproof.org/display-templates';
-
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 export type NodeType =
@@ -69,31 +67,21 @@ export interface RefTarget {
 
 export type RefParent = Chapter | Section | Definition | Theorem | Proof | Remark;
 
-/** One item of a file's `references` list, which the text cites as `[i]`. */
-export interface ReferenceEntry {
-  id: string;
-  /** The item's index in the list: the `i` of the `[i]` token that cites it. */
-  index: number;
-  /** The item as the site build reads it, or undefined when it can't be read. */
-  item: ReferenceItem | undefined;
-  /** The item's targets resolved against the loaded content, in the item's order. */
-  targets: RefTarget[];
-  parent: RefParent;
-}
-
 /**
- * A file's references, read with the site build's reader. Until the editor can
- * edit references, a save writes `source` back unchanged and leaves the `[i]`
- * tokens in the text as they are, so the list and the tokens stay in step.
+ * A file's `references` list as the file last had it. The editor holds each
+ * reference in the token that cites it (src/protocol/referenceToken.ts), so the
+ * text is where references are edited, and a save writes the list from the text.
+ * What is kept here is only what writing it back needs.
  */
 export interface FileReferences {
-  entries: ReferenceEntry[];
-  /** The index each `[i]` token cites, in the order the site renders the text, as loaded. */
-  tokens: number[];
-  /** The `references` section exactly as the file had it when loaded, or null when it has none. */
+  /** The list's items as YAML parses them, when the file was loaded or last saved. */
+  saved: unknown[];
+  /** The `references` section exactly as the file had it then, or null when it had none. */
   source: string | null;
   /** The file still has the keyed dictionary the list replaced, which the site rejects. */
   isDictionary: boolean;
+  /** What the site build's reader reports about the file's references, as loaded. */
+  problems: string[];
 }
 
 // ─── Content blocks ───────────────────────────────────────────────────────────

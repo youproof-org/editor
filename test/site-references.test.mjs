@@ -20,7 +20,7 @@ Module._load = function (request, ...rest) {
 }
 
 const {
-  loadContent, readServicesData, readDisplayTemplates, numberContent, editorOutline, resolveFileReferences,
+  loadContent, readServicesData, readDisplayTemplates, numberContent, editorOutline, resolveFileReferences, heldReferenceItems,
 } = await import('../out/test/host.js')
 
 const contentDir = process.env.YOUPROOF_CONTENT_DIR
@@ -67,7 +67,7 @@ test('every reference resolves through the editor numbering as the site resolves
       mismatches.push(`${key}: the site has no such owner`)
       continue
     }
-    const actual = resolveFileReferences(owner.references, owner.locale, resolution).map(marked)
+    const actual = resolveFileReferences(heldReferenceItems(owner), owner.locale, resolution).map(marked)
     references += expected.length
     if (actual.length !== expected.length) mismatches.push(`${key}: ${actual.length} references, the site has ${expected.length}`)
     expected.forEach((want, i) => {

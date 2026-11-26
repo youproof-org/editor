@@ -3,5 +3,6 @@ export * from '../src/content/loader';
 export * from '../src/content/servicesData';
 export * from '../src/content/displayTemplates';
 export * from '../src/content/references';
+export * from '../src/protocol/referenceToken';
 export { fileReferenceTexts, inlineTokens } from '@youproof.org/display-templates';
 export * from '../src/content/numbering';

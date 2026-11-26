@@ -16,7 +16,7 @@ Module._load = function (request, ...rest) {
 }
 
 const {
-  loadContent, numberContent, resolveFileReferences, describeNumberingProblems, readDisplayTemplates,
+  loadContent, numberContent, resolveFileReferences, heldReferenceItems, describeNumberingProblems, readDisplayTemplates,
 } = await import('../out/test/host.js')
 
 const form = (word) => ({ canonical: word, cases: { ine: { base: word, suffix: 'ben' } } })
@@ -124,7 +124,7 @@ function resolveS2(root) {
   const templates = readDisplayTemplates(root, 'xx', REGISTRY, ['xx'])
   assert.deepEqual(templates.errors, [])
   const section = content.idToObject.get(content.filePathToId.get(path.join(root, S2)))
-  const displays = resolveFileReferences(section.references, 'xx', { numbering, templates: templates.collection, labels: REGISTRY })
+  const displays = resolveFileReferences(heldReferenceItems(section), 'xx', { numbering, templates: templates.collection, labels: REGISTRY })
   const shown = displays.map((d) => d.error ?? d.segments.map((s) => (s.kind === 'link' ? `[${s.text}]` : s.text)).join(''))
   return { numbering, shown }
 }

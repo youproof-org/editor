@@ -10,6 +10,7 @@ import {
   describeDisplayTemplateErrors, DISPLAY_TEMPLATES_DIR, displayTemplatesFile, readDisplayTemplates, type DisplayTemplates,
 } from './content/displayTemplates';
 import { describeNumberingProblems, numberContent } from './content/numbering';
+import { describeLoadedReferenceProblems } from './content/references';
 import type { LoadedContent } from './content/model';
 import { registerHandlers, resolveContentRoot, resolveServicesRootSetting } from './handlers';
 
@@ -67,8 +68,11 @@ export function activate(context: vscode.ExtensionContext): void {
   function getContent(): LoadedContent {
     if (!contentCache) {
       const { localeConfig } = getServices();
-      contentCache = loadContent(resolveContentRoot(context), activeLocale ?? localeConfig.defaultLocale, localeConfig.locales[0]);
+      contentCache = loadContent(
+        resolveContentRoot(context), activeLocale ?? localeConfig.defaultLocale, localeConfig.locales[0], getDisplayTemplates().collection,
+      );
       reportNumberingProblems(contentCache);
+      reportReferenceProblems(contentCache);
     }
     return contentCache;
   }
@@ -79,6 +83,16 @@ export function activate(context: vscode.ExtensionContext): void {
     const problem = describeNumberingProblems(numberContent(content).problems);
     if (problem && problem !== reportedNumberingProblems) vscode.window.showErrorMessage(problem);
     reportedNumberingProblems = problem;
+  }
+
+  function reportReferenceProblems(content: LoadedContent): void {
+    const files = [...content.idToObject.values()].flatMap((obj) => {
+      const { filePath, references } = obj as { filePath?: string; references?: { problems?: string[] } };
+      return filePath && references?.problems?.length
+        ? [{ filePath: path.relative(resolveContentRoot(context), filePath), problems: references.problems }] : [];
+    });
+    const problem = describeLoadedReferenceProblems(files);
+    if (problem) vscode.window.showErrorMessage(problem);
   }
 
   const contentRootSet = !!vscode.workspace.getConfiguration('youproof').get<string>('contentRoot')?.trim();
@@ -136,6 +150,7 @@ export function activate(context: vscode.ExtensionContext): void {
       activeLocale = l;
       getDisplayTemplates();
     },
+    getDisplayTemplates: () => getDisplayTemplates().collection,
   });
 
   context.subscriptions.push(

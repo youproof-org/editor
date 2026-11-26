@@ -5,17 +5,17 @@ import type {
   LoadedContent, LoadProblem, NumberingScope,
   Book, Part, Chapter, Section,
   Namespace, Definition, Theorem, Proof, Remark,
-  Term, RefTarget, RefTargetType, RefParent, FileReferences, ReferenceEntry,
+  Term, RefTarget, RefTargetType, RefParent, FileReferences,
   ContentBlock, BlockParent,
   SubsectionBlock, DetailsBlock, EmbedBlock,
   EntityLabelFields,
 } from './model';
 import { fqnJoin, isExternalTarget, parseFqn, type FqnStep, type RefTargetKind } from '@youproof.org/content-model';
-import { fileReferenceTexts, readReferences, referenceTokens, type ReferenceFileKind } from '@youproof.org/display-templates';
+import { fileReferenceTexts, readReferences, type DisplayTemplateCollection, type ReferenceFileKind } from '@youproof.org/display-templates';
 import { normalizeStrings } from './normalize';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
-import { referencesSection } from './references';
+import { holdReferences, referencesSection } from './references';
 
 // Structural YAML files (a directory's own content object) — excluded when
 // scanning a directory for child section files, which are matched by `name`.
@@ -25,7 +25,7 @@ const STRUCTURAL_YAML_FILES = new Set([
   'namespace.yaml',
 ]);
 
-const noReferences = (): FileReferences => ({ entries: [], tokens: [], source: null, isDictionary: false });
+const noReferences = (): FileReferences => ({ saved: [], source: null, isDictionary: false, problems: [] });
 
 // ─── ID generation ────────────────────────────────────────────────────────────
 
@@ -48,7 +48,11 @@ function sectionKey(b: string, p: string, c: string, s: string) { return `/books
 // so the in-memory model never mixes locales. A locale with no content yields an
 // empty model (no error) — that's what makes the per-locale reload buttons
 // forward-compatible before other locales exist.
-export function loadContent(contentRoot: string, locale: string, siteDefaultLocale: string = locale): LoadedContent {
+// `templates` is the locale's display template collection, which the references are
+// checked against. Without it they aren't checked, and no file has reference problems.
+export function loadContent(
+  contentRoot: string, locale: string, siteDefaultLocale: string = locale, templates?: DisplayTemplateCollection,
+): LoadedContent {
   // A content file's locale: its `locale` field, else the first locale in locales.json,
   // which is the website's default when its DEFAULT_LOCALE build setting is unset. Not
   // youproof.defaultLocale, which only picks the locale the editor opens with.
@@ -187,27 +191,20 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
   }
 
   // Read with the site build's reader from the file as YAML parses it, before
-  // normalizeStrings, so the items, the texts their tokens sit in and the order
-  // are the ones the site reads.
-  function loadReferences(filePath: string, kind: ReferenceFileKind, parent: RefParent): FileReferences {
+  // normalizeStrings, so the items, the texts their tokens sit in and the order are
+  // the ones the site reads. Each item is then put into the tokens that cite it in
+  // `data`, the parsed file the blocks are loaded from.
+  function loadReferences(filePath: string, kind: ReferenceFileKind, parent: RefParent, data: Record<string, unknown>): FileReferences {
     const source = fs.readFileSync(filePath, 'utf-8');
     const parsed = yaml.load(source);
     const file = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
     const list = file['references'];
-    const texts = fileReferenceTexts(file, kind);
-    const { references } = readReferences(list, { locale: parent.locale, templates: {}, texts });
-    const tokens = texts.flatMap((text) => [...referenceTokens(text)].flatMap((token) => token.kind === 'ref' ? [token.index] : []));
-    const entries = references.map((item, index): ReferenceEntry => {
-      const entry: ReferenceEntry = { id: genId(), index, item, targets: [], parent };
-      reg(entry.id, entry);
-      for (const [k, target] of (item?.targets ?? []).entries()) {
-        entry.targets.push({ type: 'unresolved', target: '' });
-        enqueueTarget(target.type === 'external' ? target.url : target.fqn, r => { entry.targets[k] = r; });
-      }
-      return entry;
-    });
     const isDictionary = list !== null && typeof list === 'object' && !Array.isArray(list);
-    return { entries, tokens, source: referencesSection(source), isDictionary };
+    const problems = templates
+      ? readReferences(list, { locale: parent.locale, templates: { [parent.locale]: templates }, texts: fileReferenceTexts(file, kind) }).errors
+      : [];
+    if (Array.isArray(list)) holdReferences(data, kind, list);
+    return { saved: Array.isArray(list) ? list : [], source: referencesSection(source), isDictionary, problems };
   }
 
   function loadBlocks(rawList: unknown, parent: BlockParent): ContentBlock[] {
@@ -371,7 +368,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         prologue: [], sections: [], epilogue: [], part,
       };
       registerFile(id, chapterYaml); reg(id, chapter); regRef(chapterKey(bookName, partName, chapterName), id);
-      chapter.references          = loadReferences(chapterYaml, 'chapter', chapter);
+      chapter.references          = loadReferences(chapterYaml, 'chapter', chapter, data);
       chapter.abstract            = loadBlocks(data['abstract'], chapter);
       chapter.prerequisiteWarning = loadBlocks(data['prerequisite-warning'], chapter);
       chapter.prologue            = loadBlocks(data['prologue'], chapter);
@@ -409,7 +406,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         references: noReferences(), body: [], chapter,
       };
       registerFile(id, sectionFile); reg(id, section); regRef(sectionKey(bookName, partName, chapterName, sectionName), id);
-      section.references = loadReferences(sectionFile, 'section', section);
+      section.references = loadReferences(sectionFile, 'section', section, data);
       section.body       = loadBlocks(data['body'], section);
       return section;
     } catch (err) {
@@ -527,7 +524,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         };
         registerFile(id, filePath); reg(id, def); regRef(key, id);
         def.terms      = loadTerms(data['terms'], def);
-        def.references = loadReferences(filePath, 'entity', def);
+        def.references = loadReferences(filePath, 'entity', def, data);
         def.body       = loadBlocks(data['body'], def);
         const defText  = collectBlockText(def.body);
         def.terms      = sortTermsByFirstOccurrence(def.terms, defText);
@@ -544,7 +541,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         };
         registerFile(id, filePath); reg(id, thm); regRef(key, id);
         thm.terms      = loadTerms(data['terms'], thm);
-        thm.references = loadReferences(filePath, 'entity', thm);
+        thm.references = loadReferences(filePath, 'entity', thm, data);
         thm.body       = loadBlocks(data['body'], thm);
         const thmText  = collectBlockText(thm.body);
         thm.terms      = sortTermsByFirstOccurrence(thm.terms, thmText);
@@ -560,7 +557,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
           references: noReferences(), body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, proof); regRef(key, id);
-        proof.references = loadReferences(filePath, 'entity', proof);
+        proof.references = loadReferences(filePath, 'entity', proof, data);
         proof.body       = loadBlocks(data['body'], proof);
         remarkNames.set(id, strArr(data, 'remarks'));
         return proof;
@@ -574,7 +571,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       };
       registerFile(id, filePath); reg(id, rem); regRef(key, id);
       rem.terms      = loadTerms(data['terms'], rem);
-      rem.references = loadReferences(filePath, 'entity', rem);
+      rem.references = loadReferences(filePath, 'entity', rem, data);
       rem.body       = loadBlocks(data['body'], rem);
       const remText  = collectBlockText(rem.body);
       rem.terms      = sortTermsByFirstOccurrence(rem.terms, remText);

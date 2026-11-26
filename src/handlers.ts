@@ -1,15 +1,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'util';
 import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
-import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark, FileReferences, ReferenceEntry } from './content/model';
+import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark, FileReferences } from './content/model';
 import {
   fqnJoin, isExternalTarget, KEBAB_CASE, KB_ENTITY_TYPES as LABELLED_ENTITY_TYPES,
   type EntityLabelRegistry, type FqnStep, type RefTargetKind,
 } from '@youproof.org/content-model';
+import { fileReferenceTexts, readReferences, type DisplayTemplateCollection } from '@youproof.org/display-templates';
 import { normalizeStrings } from './content/normalize';
+import {
+  describeSavedReferenceProblems, heldReferences, numberReferences, referenceFileKind, referencesSectionFor,
+} from './content/references';
+import { referenceTokenLabel } from './protocol/referenceToken';
 import { getLocales } from './content/locales';
 import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
 import type {
@@ -51,13 +57,15 @@ export interface HandlerContext {
   contentChanged:    () => void;
   getActiveLocale:   () => string;
   setActiveLocale:   (locale: string) => void;
+  /** The loaded locale's display templates, which a save checks the file's references against. */
+  getDisplayTemplates: () => DisplayTemplateCollection;
 }
 
 // ─── Handler registration ─────────────────────────────────────────────────────
 
 export function registerHandlers(ctx: HandlerContext): void {
   const { server, panelManager, getContent, getServices, reloadServices, getSelectedId, setSelectedId,
-          resetContentCache, contentChanged, getActiveLocale, setActiveLocale } = ctx;
+          resetContentCache, contentChanged, getActiveLocale, setActiveLocale, getDisplayTemplates } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
@@ -192,8 +200,9 @@ export function registerHandlers(ctx: HandlerContext): void {
       else delete obj['label'];
     }
 
-    saveFromModel(p.id, content);
+    const problems = saveFromModel(p.id, content, getDisplayTemplates());
     panelManager.setDirty(p.id, false);
+    reportSavedReferenceProblems(filePath, problems);
     contentChanged();
 
     if (oldSelectedId && !content.idToObject.has(oldSelectedId)) {
@@ -219,7 +228,9 @@ export function registerHandlers(ctx: HandlerContext): void {
       return {};
     }
 
-    for (const id of p.ids) saveFromModel(id, content);
+    for (const id of p.ids) {
+      reportSavedReferenceProblems(content.idToFilePath.get(id) ?? id, saveFromModel(id, content, getDisplayTemplates()));
+    }
     return {};
   });
 
@@ -381,7 +392,13 @@ export function registerHandlers(ctx: HandlerContext): void {
 
 // ─── Content navigation helpers ───────────────────────────────────────────────
 
+// A reference has no object of its own, so its tree item is named by its owner and position.
+const REFERENCE_TREE_ID = ':reference:';
+const referenceTreeId = (ownerId: string, index: number): string => `${ownerId}${REFERENCE_TREE_ID}${index}`;
+
 function findFileBacked(id: string, content: LoadedContent): string | null {
+  const owner = id.includes(REFERENCE_TREE_ID) ? id.slice(0, id.indexOf(REFERENCE_TREE_ID)) : null;
+  if (owner && content.idToFilePath.has(owner)) return owner;
   let cur = content.idToObject.get(id) as { parent?: { id: string } } | undefined;
   for (let i = 0; i < 10 && cur?.parent; i++) {
     const parentId = cur.parent.id;
@@ -541,6 +558,11 @@ const TERM_BEARING_TYPES = ['definition', 'theorem', 'remark'];
 
 const KB_ENTITY_TYPES: readonly string[] = LABELLED_ENTITY_TYPES;
 
+function reportSavedReferenceProblems(filePath: string, problems: readonly string[]): void {
+  const problem = describeSavedReferenceProblems(path.basename(filePath), problems);
+  if (problem) vscode.window.showErrorMessage(problem);
+}
+
 function showingServicesErrors<T>(fn: () => T): T {
   try {
     return fn();
@@ -573,12 +595,17 @@ export function entityLabelFields(obj: Record<string, unknown>, services: Servic
   };
 }
 
-// Exported for the round-trip test (test/save-roundtrip.test.mjs), which asserts
-// that saving a knowledge-base file preserves the unmodelled `slug` fields and is
-// idempotent. Not part of the extension's public surface.
-export function saveFromModel(id: string, content: LoadedContent): void {
+/**
+ * Write a content object's file from the model, merged into the YAML on disk so that
+ * keys the model doesn't hold survive. The references its text holds are
+ * written as the `references` list, numbered in the order the site reads them, and
+ * an unchanged list is written back exactly as the file had it. Returns what the site
+ * build's reader reports about the references as written, checked against
+ * `templates`; without them, nothing is checked.
+ */
+export function saveFromModel(id: string, content: LoadedContent, templates?: DisplayTemplateCollection): string[] {
   const filePath = content.idToFilePath.get(id);
-  if (!filePath) return;
+  if (!filePath) return [];
 
   const obj  = content.idToObject.get(id) as WireBlock;
   const type = obj['type'] as string;
@@ -656,7 +683,13 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     delete yamlDoc['terms'];
   }
 
-  if (references?.source) yamlDoc['references'] = REFERENCES_PLACEHOLDER;
+  const kind = referenceFileKind(type);
+  const items = numberReferences(yamlDoc, kind);
+  const section = references && isDeepStrictEqual(items, references.saved)
+    ? references.source
+    : items.length > 0 ? referencesSectionFor(items) : null;
+  if (section) yamlDoc['references'] = REFERENCES_PLACEHOLDER;
+  else delete yamlDoc['references'];
 
   if (KB_ENTITY_TYPES.includes(type)) {
     if (typeof obj['label'] === 'string' && obj['label']) yamlDoc['label'] = obj['label'];
@@ -668,21 +701,28 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     normalizeStrings(reordered) as Record<string, unknown>,
     { lineWidth: 120, noCompatMode: true },
   );
-  fs.writeFileSync(filePath, references?.source ? withReferencesSection(dumped, references.source) : dumped);
+  const written = section ? withReferencesSection(dumped, section) : dumped;
+  fs.writeFileSync(filePath, written);
+  if (references) {
+    references.saved = items;
+    references.source = section;
+  }
+  if (!templates) return [];
+  const doc = yaml.load(written) as Record<string, unknown>;
+  const locale = typeof obj['locale'] === 'string' ? obj['locale'] as string : '';
+  return readReferences(doc['references'], { locale, templates: { [locale]: templates }, texts: fileReferenceTexts(doc, kind) }).errors;
 }
 
-// The editor can't edit references yet, so a save writes the list back exactly as
-// it was loaded, which keeps it in step with the `[i]` tokens the text still holds.
-// js-yaml would rewrite its one-item-per-line flow style, so the section is put in
-// after the dump, in place of a placeholder that keeps the key's position.
-const REFERENCES_PLACEHOLDER = 'yp-editor-references-as-loaded';
+// js-yaml would rewrite the list's one-item-per-line flow style, so the section is
+// put in after the dump, in place of a placeholder that keeps the key's position.
+const REFERENCES_PLACEHOLDER = 'yp-editor-references';
 
 function withReferencesSection(dumped: string, section: string): string {
   const lines = dumped.split('\n');
   const placeholder = `references: ${REFERENCES_PLACEHOLDER}`;
   const at = lines.indexOf(placeholder);
   if (at === -1 || lines.indexOf(placeholder, at + 1) !== -1) {
-    throw new Error('The references list could not be written back unchanged, so nothing was saved.');
+    throw new Error('The references list could not be put in its place in the file, so nothing was saved.');
   }
   lines.splice(at, 1, section.replace(/\n$/, ''));
   return lines.join('\n');
@@ -867,13 +907,13 @@ function blockToYaml(
     case 'unordered-list': {
       const r = blockHeader(wire, bt);
       if (wire['leadIn']) r['lead-in'] = wire['leadIn'];
-      r['items'] = wire['items'];
+      r['items'] = Array.isArray(wire['items']) ? [...wire['items']] : wire['items'];
       return r;
     }
     case 'typewriter': {
       const r = blockHeader(wire, 'typewriter');
       if (wire['leadIn']) r['lead-in'] = wire['leadIn'];
-      r['rows'] = wire['rows'];
+      r['rows'] = Array.isArray(wire['rows']) ? [...wire['rows']] : wire['rows'];
       return r;
     }
     case 'quote': {
@@ -1090,12 +1130,11 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     return { id, type: 'group', label, isFileBacked: false, children };
   }
 
-  function refItems(references: FileReferences): ContentTreeItem[] {
-    return references.entries.map((entry: ReferenceEntry) => ({
-      id: entry.id, type: 'reference' as const,
-      label: [`[${entry.index}]`, entry.item?.display ?? entry.item?.text].filter(Boolean).join(' '),
+  function refItems(owner: { id: string }): ContentTreeItem[] {
+    return heldReferences(owner as unknown as Record<string, unknown>).map((item, index) => ({
+      id: referenceTreeId(owner.id, index), type: 'reference' as const,
+      label: `[${index}] ${referenceTokenLabel(item)}`,
       isFileBacked: false,
-      targetId: entry.targets[0]?.target || undefined,
       children: [],
     }));
   }
@@ -1114,7 +1153,7 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     const anyEntity = entity as unknown as Record<string, unknown>;
     const terms  = Array.isArray(anyEntity['terms']) ? anyEntity['terms'] as Array<{ id: string; name: string; canonical: string }> : [];
     const body   = entity.body as unknown as Array<Record<string, unknown>>;
-    return [...termItems(terms), ...claimItems(body), ...refItems(entity.references)];
+    return [...termItems(terms), ...claimItems(body), ...refItems(entity)];
   }
 
   function entityToTree(entity: Definition | Theorem | Proof | Remark): ContentTreeItem {
@@ -1161,11 +1200,12 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     children: book.parts.map(part => ({
       id: part.id, type: 'part', label: part.title, isFileBacked: part.filePath !== null,
       children: part.chapters.map(chapter => {
+        const chapterReferences = refItems(chapter);
         const chChildren: ContentTreeItem[] = [
-          ...(chapter.references.entries.length ? [group(`${chapter.id}:_refs`, 'References', refItems(chapter.references))] : []),
+          ...(chapterReferences.length ? [group(`${chapter.id}:_refs`, 'References', chapterReferences)] : []),
           ...chapter.sections.map(section => ({
             id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
-            children: refItems(section.references),
+            children: refItems(section),
           })),
         ];
         return { id: chapter.id, type: 'chapter', label: chapter.title, isFileBacked: chapter.filePath !== null, children: chChildren };
