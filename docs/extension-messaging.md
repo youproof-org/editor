@@ -160,6 +160,7 @@ interface ContentTargetObject {
   id:    string;
   type:  string;   // 'definition' | 'theorem' | 'proof' | 'remark' | 'chapter' | 'section' | 'term' | 'claim' | 'external'
   label: string;   // title or name of the target object
+  path?: string;   // set only on a sidebar pick, see endSelectTarget
 }
 ```
 
@@ -296,6 +297,99 @@ The extension host:
 
 Marks the panel tab dirty (prepends `●` to the title) and promotes it out of preview mode (pins the tab). The dirty flag is cleared internally by the extension at the end of a successful `saveContentObject` — no separate message is sent for that direction.
 
+### `getReferenceChoices`
+
+**Direction:** editor panel → extension host  
+**Caller:** none yet in the webview; the reference popup is what it is for  
+**Params:** `{ id: string }`: the panel's content object  
+**Result:** `ReferenceChoices`
+
+```typescript
+interface ReferenceChoices {
+  templates: DisplayTemplateChoice[];   // in the collection's order
+  targets:   ReferenceTargetChoice[];   // in reading order, an entity followed by its claims and terms, then what nothing embeds
+  error?:    string;                    // set, with both lists empty, when references can't be rendered at all
+}
+
+interface DisplayTemplateChoice {
+  name:    string;
+  targets: string[];                          // the target kinds it accepts
+  count:   { min: number; max?: number };     // { min: 1, max: 1 } for a single template
+  list:    boolean;
+  order:   'sorted' | 'authored';             // 'sorted' for a single template
+  groupBy?: 'label' | 'parent' | 'type';
+  uses:    Record<string, number>;            // uses in the loaded lists, by the kinds of an item's targets, sorted and joined by '+'
+}
+
+interface ReferenceTargetChoice {
+  path:   string;     // what an item's `target` holds for it
+  kind:   'chapter' | 'section' | 'definition' | 'theorem' | 'proof' | 'remark' | 'claim' | 'term';
+  id:     string;     // the model id
+  label:  string;     // '24.16. Tétel', '23.5.', '23.', a claim's '3.', a term's canonical form
+  title?: string;     // a chapter's, section's or entity's title; a claim's words without markup
+  owner?: string;     // the owner's label, for a claim, a term, a proof and a remark an entity lists
+  labelName?: string; // an entity's label variant, capitalized: 'Tétel', 'Lemma'
+  position?: number;  // reading order; absent for what nothing embeds
+  groups: { type?: string; parent?: string; label?: string };   // the shared `groupKeys`
+  synonyms?: string[];                       // a term's synonyms
+  texts?: { text: string; uses: number }[];  // a term's link texts in the loaded lists, most used first
+  problem?: string;   // why its number can't be trusted, when missing content could change it
+}
+```
+
+The host builds it in `src/content/referenceChoices.ts` from the numbering, the loaded locale's display templates and the label registry, and keeps it until one of them changes, so it is built again after a save, a reload or a change to the collection, which are the times `referenceDisplaysChanged` fires. A target's `path` is the key the editor's numbering and the site's graph use: a proof under its theorem, a remark under the entity that lists it, a chapter under its book, a section under its chapter, a claim or a term under its entity. A remark that nothing lists has no path the grammar accepts, and a claim inside a subsection or a details block is not numbered by the site, so neither is offered. `uses` and `texts` count the files' `references` lists as they were loaded or last saved. When the entity label registry couldn't be read, the result is `{ templates: [], targets: [], error }` with the same message `resolveReferenceTokens` gives.
+
+---
+
+### `openExternalUrl`
+
+**Direction:** editor panel → extension host  
+**Caller:** `useTargetSelection.ts` (`handleOpenTarget`), for a target of type `external`  
+**Params:** `{ url: string }`  
+**Result:** `{}`
+
+The host opens the URL with `vscode.env.openExternal`.
+
+---
+
+### `beginSelectTarget`
+
+**Direction:** editor panel → extension host  
+**Caller:** `useTargetSelection.ts` (`handleBeginSelectTarget`), when an embed block's target selector starts a pick in the sidebar  
+**Params:** `{ selectorId: string; allowedTypes: string[] }`: who started the pick, and the tree node types that can be picked  
+**Result:** `{}`
+
+The host remembers the pick and broadcasts `targetSelectionStarted` with the same params. While a pick is pending, another `beginSelectTarget` is ignored.
+
+---
+
+### `endSelectTarget`
+
+**Direction:** sidebar or editor panel → extension host  
+**Caller:** `App.tsx` (sidebar), with the node's id when its Select button is clicked and with `null` from "Cancel select target"; `useTargetSelection.ts` (`handleEndSelectTarget`), with `null` from an embed block's Cancel  
+**Params:** `{ targetId: string | null }`  
+**Result:** `{}`
+
+Without a pending pick it does nothing. Otherwise the host ends the pick and broadcasts `targetSelectionEnded` with the pending `selectorId` and a `result`: `null` for a cancel or for an id it can't type, else a `ContentTargetObject`:
+
+```typescript
+interface ContentTargetObject {
+  id:    string;
+  type:  string;   // 'chapter' | 'section' | 'definition' | 'theorem' | 'proof' | 'remark' | 'claim' | 'term'
+  label: string;   // the object's title, else its name
+  path?: string;   // the target's path, the same one getReferenceChoices gives for this id; absent for what it doesn't offer
+}
+```
+
+---
+
+### `getSelfReferenceDisplaySuggestions`
+
+**Direction:** editor panel → extension host  
+**Caller:** `FigureBlock.tsx`, for the suggestions of the figure's self-reference display field (`SuggestionInput`)  
+**Params:** `{}`  
+**Result:** `{ suggestions: string[] }`: every distinct `self-reference.display` of the loaded figures, the most used first
+
 ---
 
 ## Notifications
@@ -316,6 +410,35 @@ Notifications flow from the extension host to all registered webviews. The clien
 - `NodeView.tsx` (editor panels) — sets `selectedId` directly, with no follow-up request
 
 ---
+
+### `targetSelectionStarted`
+
+**Direction:** extension host → all webviews (broadcast via `MessageServer.notify()`)  
+**Trigger:** `beginSelectTarget`  
+**Params:** `{ selectorId: string; allowedTypes: string[] }`  
+**Subscribers:**
+- `App.tsx` (sidebar), which shows a Select button on each node whose type is in `allowedTypes` and replaces the reload buttons with "Cancel select target"
+- `useTargetSelection.ts` (editor panels), which records `selectorId` as the selector that is picking
+
+---
+
+### `targetSelectionEnded`
+
+**Direction:** extension host → all webviews (broadcast via `MessageServer.notify()`)  
+**Trigger:** `endSelectTarget`, while a pick is pending  
+**Params:** `{ selectorId: string; result: ContentTargetObject | null }`  
+**Subscribers:**
+- `App.tsx` (sidebar), which leaves the selection mode
+- `useTargetSelection.ts` (editor panels), which clears the picking selector. Only the panel that sent `beginSelectTarget` acts on `result`: it sets the embed block whose id is `selectorId` to the picked target and marks the panel dirty.
+
+---
+
+### `contentObjectUpdated`
+
+**Direction:** extension host → all webviews (broadcast via `MessageServer.notify()`)  
+**Trigger:** `saveContentObject`, after the save  
+**Params:** `{ id: string }`: the saved object  
+**Subscribers:** `App.tsx` (sidebar), which asks for the tree again with `getContentTree`
 
 ---
 

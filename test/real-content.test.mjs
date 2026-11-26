@@ -25,6 +25,7 @@ Module._load = function (request, ...rest) {
 const {
   loadContent, saveFromModel, serializeBlocks, updateModelBlocks, referencesSection, referencesSectionFor,
   fileReferenceTexts, inlineTokens, readServicesData, readDisplayTemplates,
+  numberContent, buildReferenceChoices, parseRefTarget, encodeReferenceToken, resolveReferenceToken,
 } = await import('../out/test/host.js')
 
 const contentDir = process.env.YOUPROOF_CONTENT_DIR
@@ -95,4 +96,58 @@ test('every real content file loads without reference problems, and its list is 
   }
   t.diagnostic(`${lists} lists written as the files have them`)
   assert.deepEqual(problems.slice(0, 20), [])
+})
+
+function choicesOf(root) {
+  const services = readServicesData(servicesDir)
+  const templates = templatesOf(root)
+  const content = loadContent(root, locale, locale, templates)
+  const resolution = { numbering: numberContent(content), templates, labels: services.entityLabels }
+  return { content, resolution, choices: buildReferenceChoices(content, resolution) }
+}
+
+const MODELLED = ['chapter', 'section', 'definition', 'theorem', 'proof', 'remark', 'claim', 'term']
+
+test('the reference popup offers every target the real references use, under the same path, each naming its object', { skip }, (t) => {
+  const { content, choices } = choicesOf(path.resolve(contentDir))
+  const offered = new Map(choices.targets.map((target) => [target.path, target]))
+  const missing = new Set()
+  let cited = 0
+  for (const obj of content.idToObject.values()) {
+    for (const item of obj.references?.saved ?? []) {
+      for (const target of item.targets ?? [item.target]) {
+        let kind
+        try { kind = parseRefTarget(target, 'target').type } catch { continue }
+        if (!MODELLED.includes(kind)) continue
+        cited++
+        if (!offered.has(target)) missing.add(target)
+      }
+    }
+  }
+  const kindOf = (obj) => obj.type ?? obj.blockType ?? (Array.isArray(obj.synonyms) ? 'term' : undefined)
+  const misnamed = choices.targets.filter((target) => {
+    const obj = content.idToObject.get(target.id)
+    return !obj || obj.name !== parseRefTarget(target.path, 'target').name || kindOf(obj) !== target.kind
+  }).map((target) => target.path)
+  t.diagnostic(`${choices.targets.length} targets offered, ${cited} cited targets of the kinds the editor loads`)
+  assert.deepEqual([...missing], [])
+  assert.deepEqual(misnamed, [])
+})
+
+test('every template the popup offers for a single real target renders it', { skip }, (t) => {
+  const { resolution, choices } = choicesOf(path.resolve(contentDir))
+  const failures = []
+  let rendered = 0
+  for (const target of choices.targets) {
+    if (target.problem) continue
+    for (const template of choices.templates) {
+      if (!template.targets.includes(target.kind) || template.count.min > 1) continue
+      const payload = encodeReferenceToken({ display: template.name, target: target.path }).slice(2, -1)
+      const display = resolveReferenceToken(payload, locale, resolution)
+      rendered++
+      if (display.error) failures.push(`${template.name} on ${target.path}: ${display.error}`)
+    }
+  }
+  t.diagnostic(`${rendered} previews rendered`)
+  assert.deepEqual(failures.slice(0, 20), [])
 })

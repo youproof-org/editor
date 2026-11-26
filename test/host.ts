@@ -8,3 +8,6 @@ export { fileReferenceTexts, inlineTokens } from '@youproof.org/display-template
 export * from '../src/content/numbering';
 export * from '../src/content/referenceDisplays';
 export * from '../src/protocol/referencePlacement';
+export * from '../src/content/referenceChoices';
+export { groupKeys } from '@youproof.org/display-templates';
+export { parseRefTarget } from '@youproof.org/content-model';

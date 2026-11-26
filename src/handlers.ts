@@ -17,6 +17,7 @@ import {
 } from './content/references';
 import type { ReferenceResolution } from './content/numbering';
 import { resolveReferenceTokens } from './content/referenceDisplays';
+import { buildReferenceChoices } from './content/referenceChoices';
 import { getLocales } from './content/locales';
 import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
 import type {
@@ -38,6 +39,9 @@ import type {
   GetSelfReferenceDisplaySuggestionsResponse,
   ResolveReferenceTokensRequest,
   ResolveReferenceTokensResponse,
+  GetReferenceChoicesRequest,
+  GetReferenceChoicesResponse,
+  ReferenceChoices,
   GetContentTreeResponse,
   GetContentObjectResponse,
   ReloadModelResponse,
@@ -73,6 +77,20 @@ export function registerHandlers(ctx: HandlerContext): void {
           resetContentCache, contentChanged, getActiveLocale, setActiveLocale, getDisplayTemplates,
           getReferenceResolution } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
+  let cachedChoices: { resolution: ReferenceResolution; choices: ReferenceChoices } | null = null;
+
+  const referenceChoices = (): ReferenceChoices | string => {
+    const resolution = getReferenceResolution();
+    if (typeof resolution === 'string') return resolution;
+    const cached = cachedChoices?.resolution;
+    if (cachedChoices && cached && cached.numbering === resolution.numbering && cached.templates === resolution.templates &&
+        cached.labels === resolution.labels) {
+      return cachedChoices.choices;
+    }
+    const choices = buildReferenceChoices(getContent(), resolution);
+    cachedChoices = { resolution, choices };
+    return choices;
+  };
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
     return {
@@ -361,6 +379,13 @@ export function registerHandlers(ctx: HandlerContext): void {
     return { displays: resolveReferenceTokens(p.payloads, String(obj['locale'] ?? getActiveLocale()), resolution) };
   });
 
+  server.onRequest('getReferenceChoices', async (params): Promise<GetReferenceChoicesResponse> => {
+    const p = params as GetReferenceChoicesRequest;
+    if (!getContent().idToObject.has(p.id)) throw new Error(`Object not found: ${p.id}`);
+    const choices = referenceChoices();
+    return typeof choices === 'string' ? { templates: [], targets: [], error: choices } : choices;
+  });
+
   server.onRequest('openExternalUrl', async (params) => {
     const p = params as OpenExternalUrlRequest;
     await vscode.env.openExternal(vscode.Uri.parse(p.url));
@@ -398,7 +423,9 @@ export function registerHandlers(ctx: HandlerContext): void {
         }
         if (type !== undefined) {
           const label = (found['title'] as string | undefined) ?? (found['name'] as string | undefined) ?? p.targetId;
-          result = { id: p.targetId, type, label };
+          const choices = referenceChoices();
+          const path = typeof choices === 'string' ? undefined : choices.targets.find((target) => target.id === p.targetId)?.path;
+          result = { id: p.targetId, type, label, ...(path ? { path } : {}) };
         }
       }
     }
