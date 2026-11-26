@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
 import type { MessageServer } from './protocol/messageServer';
 import type { PanelManager } from './views/panelManager';
-import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark } from './content/model';
+import type { LoadedContent, Namespace, Definition, Theorem, Proof, Remark, FileReferences, ReferenceEntry } from './content/model';
 import {
   fqnJoin, isExternalTarget, KEBAB_CASE, KB_ENTITY_TYPES as LABELLED_ENTITY_TYPES,
   type EntityLabelRegistry, type FqnStep, type RefTargetKind,
@@ -16,7 +16,6 @@ import type {
   ContentTreeItem,
   ContentTargetObject,
   ContentTerm,
-  ContentReference,
   KbEntityType,
   EntityTypeLabels,
   GetContentObjectRequest,
@@ -75,9 +74,10 @@ export function registerHandlers(ctx: HandlerContext): void {
     if (!obj) throw new Error(`Object not found: ${p.id}`);
 
     const type  = obj['type'] as string;
-    const base  = { id: p.id, name: obj['name'] as string, title: obj['title'] as string | undefined };
-    const rawRefs = Array.isArray(obj['references']) ? obj['references'] as unknown[] : [];
-    const refs    = serializeRefs(rawRefs);
+    const base  = {
+      id: p.id, name: obj['name'] as string, title: obj['title'] as string | undefined,
+      ...((obj['references'] as FileReferences | undefined)?.isDictionary ? { hasReferencesDictionary: true } : {}),
+    };
     const terms   = serializeTerms(Array.isArray(obj['terms']) ? obj['terms'] as unknown[] : []);
     const ns      = obj['namespacePath'] as string;
     const allBlocks: unknown[] = type === 'chapter'
@@ -88,7 +88,7 @@ export function registerHandlers(ctx: HandlerContext): void {
           ...(Array.isArray(obj['epilogue'])            ? obj['epilogue']            as unknown[] : []),
         ]
       : (Array.isArray(obj['body']) ? obj['body'] as unknown[] : []);
-    const targetObjects = buildTargetObjects(rawRefs, allBlocks, content);
+    const targetObjects = buildTargetObjects(allBlocks, content);
     const selectedId = getSelectedId();
 
     const labelFields = KB_ENTITY_TYPES.includes(type)
@@ -97,18 +97,18 @@ export function registerHandlers(ctx: HandlerContext): void {
 
     let contentObject;
     if (type === 'definition' || type === 'theorem' || type === 'remark') {
-      contentObject = { ...base, ...labelFields, type, namespacePath: ns, terms, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
+      contentObject = { ...base, ...labelFields, type, namespacePath: ns, terms, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
     } else if (type === 'proof') {
-      contentObject = { ...base, ...labelFields, type, namespacePath: ns, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
+      contentObject = { ...base, ...labelFields, type, namespacePath: ns, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
     } else if (type === 'chapter') {
-      contentObject = { ...base, type, references: refs,
+      contentObject = { ...base, type,
         abstract:            serializeBlocks(obj['abstract']            as unknown[]),
         prerequisiteWarning: serializeBlocks(obj['prerequisiteWarning'] as unknown[]),
         prologue:            serializeBlocks(obj['prologue']            as unknown[]),
         epilogue:            serializeBlocks(obj['epilogue']            as unknown[]),
         selectedId };
     } else if (type === 'section') {
-      contentObject = { ...base, type, references: refs, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
+      contentObject = { ...base, type, body: serializeBlocks(obj['body'] as unknown[]), selectedId };
     } else {
       throw new Error(`Unsupported type for getContentObject: ${type}`);
     }
@@ -183,8 +183,6 @@ export function registerHandlers(ctx: HandlerContext): void {
     }
     if ('terms' in p && Array.isArray(p.terms))
       updateModelTerms(obj, p.terms as ContentTerm[], content.idToObject);
-    if ('references' in p && Array.isArray(p.references))
-      updateModelRefs(obj, p.references as ContentReference[], content.idToObject);
 
     if (KB_ENTITY_TYPES.includes(p.entityType)) {
       const { label } = p as { label?: string };
@@ -601,6 +599,14 @@ export function saveFromModel(id: string, content: LoadedContent): void {
         `${type} default), then reload the content before saving here again.`,
     );
   }
+  const references = obj['references'] as FileReferences | undefined;
+  if (references?.isDictionary) {
+    throw new Error(
+      `${path.basename(filePath)} still has a 'references' dictionary, which the site no longer accepts. ` +
+        `Convert it to a list with scripts/migrate-display-templates.mjs in the content repo, ` +
+        `then reload the content before saving here again.`,
+    );
+  }
 
   if (type === 'chapter') {
     const merge = (yamlField: string, modelBlocks: WireBlock[]) => {
@@ -647,23 +653,7 @@ export function saveFromModel(id: string, content: LoadedContent): void {
     delete yamlDoc['terms'];
   }
 
-  const modelRefsArr = Array.isArray(obj['references']) ? obj['references'] as WireBlock[] : [];
-  if (modelRefsArr.length > 0) {
-    const refsYaml: Record<string, unknown> = {};
-    for (const r of modelRefsArr) {
-      const entry: Record<string, unknown> = {};
-      if (r['display']) entry['display'] = r['display'];
-      const tgt = r['target'] as { type: string; target: string } | undefined;
-      if (tgt) {
-        const yamlTarget = targetToYaml(tgt, content);
-        if (yamlTarget) entry['target'] = yamlTarget;
-      }
-      refsYaml[r['name'] as string] = entry;
-    }
-    yamlDoc['references'] = refsYaml;
-  } else {
-    delete yamlDoc['references'];
-  }
+  if (references?.source) yamlDoc['references'] = REFERENCES_PLACEHOLDER;
 
   if (KB_ENTITY_TYPES.includes(type)) {
     if (typeof obj['label'] === 'string' && obj['label']) yamlDoc['label'] = obj['label'];
@@ -671,10 +661,28 @@ export function saveFromModel(id: string, content: LoadedContent): void {
   }
 
   const reordered = reorderYamlKeys(yamlDoc, type);
-  fs.writeFileSync(filePath, yaml.dump(
+  const dumped = yaml.dump(
     normalizeStrings(reordered) as Record<string, unknown>,
     { lineWidth: 120, noCompatMode: true },
-  ));
+  );
+  fs.writeFileSync(filePath, references?.source ? withReferencesSection(dumped, references.source) : dumped);
+}
+
+// The editor can't edit references yet, so a save writes the list back exactly as
+// it was loaded, which keeps it in step with the `[i]` tokens the text still holds.
+// js-yaml would rewrite its one-item-per-line flow style, so the section is put in
+// after the dump, in place of a placeholder that keeps the key's position.
+const REFERENCES_PLACEHOLDER = 'yp-editor-references-as-loaded';
+
+function withReferencesSection(dumped: string, section: string): string {
+  const lines = dumped.split('\n');
+  const placeholder = `references: ${REFERENCES_PLACEHOLDER}`;
+  const at = lines.indexOf(placeholder);
+  if (at === -1 || lines.indexOf(placeholder, at + 1) !== -1) {
+    throw new Error('The references list could not be written back unchanged, so nothing was saved.');
+  }
+  lines.splice(at, 1, section.replace(/\n$/, ''));
+  return lines.join('\n');
 }
 
 // Key order per type — keeps saved YAML stable instead of appending keys. The
@@ -932,62 +940,6 @@ export function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToOb
   }
 }
 
-// Exported, with serializeRefs below, for the round-trip test
-// (test/save-roundtrip.test.mjs): the two together are the webview round trip a
-// save actually goes through, where a target survives only as its ID. Not part of
-// the extension's public surface.
-export function updateModelRefs(obj: WireBlock, incoming: ContentReference[], idToObject: Map<string, unknown>): void {
-  const resolveTarget = (targetId: string | undefined): WireBlock => {
-    if (!targetId) return { type: 'external', target: '' };
-    const found = idToObject.get(targetId) as Record<string, unknown> | undefined;
-    if (found) {
-      const t = found['type'] as string | undefined;
-      // Every type the FQN grammar can address, so that a path this editor CAN
-      // rebuild is not written back as an empty external — which deletes it.
-      if (['book', 'part', 'chapter', 'section', 'definition', 'theorem', 'proof', 'remark'].includes(t ?? ''))
-        return { type: t!, target: targetId };
-      if (found['blockType'] === 'claim') return { type: 'claim', target: targetId };
-      const parent = found['parent'] as Record<string, unknown> | undefined;
-      const parentTerms = Array.isArray(parent?.['terms']) ? parent!['terms'] as unknown[] : [];
-      if (parentTerms.includes(found)) return { type: 'term', target: targetId };
-      return { type: 'external', target: '' };
-    }
-    // A scheme test, not an `http` test: `mailto:` is an external target too.
-    if (isExternalTarget(targetId)) return { type: 'external', target: targetId };
-    return { type: 'external', target: '' };
-  };
-  // The wire carries only a target's ID, so the authored path is rebuilt on save by
-  // walking the object graph. Carrying the loader's `fqn` over keeps the authored
-  // path as the writer's fallback for as long as the target is the same object —
-  // without it, a path the walk cannot rebuild is written as no target at all,
-  // which deletes it from the file.
-  const carryFqn = (prev: unknown, next: WireBlock): WireBlock => {
-    const p = prev as { target?: string; fqn?: string } | undefined;
-    if (!p?.fqn || p.target !== next['target']) return next;
-    next['fqn'] = p.fqn;
-    // A path with no object behind it is what the loader calls `unresolved` — a
-    // target this editor does not model, such as an article or a page. Naming it
-    // that again is what makes the writer put the path back untouched.
-    if (!next['target']) next['type'] = 'unresolved';
-    return next;
-  };
-  const modelRefs = Array.isArray(obj['references']) ? obj['references'] as WireBlock[] : [];
-  obj['references'] = incoming.map(r => {
-    const existing = modelRefs.find(m => m['id'] === r.id);
-    if (existing) {
-      existing['name'] = r.name; existing['display'] = r.display;
-      existing['target'] = carryFqn(existing['target'], resolveTarget(r.targetId));
-      return existing;
-    }
-    const newRef: WireBlock = { id: r.id, name: r.name, display: r.display, target: resolveTarget(r.targetId), parent: obj };
-    idToObject.set(r.id, newRef);
-    return newRef;
-  });
-  for (const m of modelRefs) {
-    if (!incoming.some(r => r.id === m['id'])) idToObject.delete(m['id'] as string);
-  }
-}
-
 function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock): void {
   model['id']        = wire['id'];
   model['blockType'] = wire['blockType'];
@@ -1071,13 +1023,6 @@ export function serializeBlocks(blocks: unknown[]): Record<string, unknown>[] {
   return (blocks as Array<Record<string, unknown>>).map(serializeBlock);
 }
 
-export function serializeRefs(raw: unknown[]): Array<Record<string, unknown>> {
-  return (raw as Array<Record<string, unknown>>).map(r => {
-    const tgt = r['target'] as { type: string; target: string } | undefined;
-    return { id: r['id'], name: r['name'], display: r['display'], targetId: tgt?.target };
-  });
-}
-
 // `slug` is not optional on the wire: updateModelTerms assigns whatever comes
 // back, so a term serialized without one returns `undefined` and the writer then
 // omits the key — deleting a slug that was only ever missing from THIS function.
@@ -1091,7 +1036,7 @@ export function serializeTerms(raw: unknown[]): Array<Record<string, unknown>> {
 
 // ─── Target object map builder ────────────────────────────────────────────────
 
-function buildTargetObjects(rawRefs: unknown[], blocks: unknown[], content: LoadedContent): Record<string, ContentTargetObject> {
+function buildTargetObjects(blocks: unknown[], content: LoadedContent): Record<string, ContentTargetObject> {
   const result: Record<string, ContentTargetObject> = {};
   const addTarget = (tgt: { type: string; target: string } | undefined): void => {
     const targetId = tgt?.target;
@@ -1106,10 +1051,6 @@ function buildTargetObjects(rawRefs: unknown[], blocks: unknown[], content: Load
     const label = (targetObj['title'] as string | undefined) ?? (targetObj['name'] as string | undefined) ?? targetId;
     result[targetId] = { id: targetId, type, label };
   };
-
-  for (const r of rawRefs as Array<Record<string, unknown>>) {
-    addTarget(r['target'] as { type: string; target: string } | undefined);
-  }
 
   const walk = (bs: unknown[]): void => {
     for (const b of bs as Array<Record<string, unknown>>) {
@@ -1132,12 +1073,12 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     return { id, type: 'group', label, isFileBacked: false, children };
   }
 
-  function refItems(refs: Array<{ id: string; name: string; display: string; target: { target: string } }>): ContentTreeItem[] {
-    return refs.map(r => ({
-      id: r.id, type: 'reference' as const,
-      label: `${r.name}`,
+  function refItems(references: FileReferences): ContentTreeItem[] {
+    return references.entries.map((entry: ReferenceEntry) => ({
+      id: entry.id, type: 'reference' as const,
+      label: [`[${entry.index}]`, entry.item?.display ?? entry.item?.text].filter(Boolean).join(' '),
       isFileBacked: false,
-      targetId: r.target.target || undefined,
+      targetId: entry.targets[0]?.target || undefined,
       children: [],
     }));
   }
@@ -1155,9 +1096,8 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
   function entityChildren(entity: Definition | Theorem | Proof | Remark): ContentTreeItem[] {
     const anyEntity = entity as unknown as Record<string, unknown>;
     const terms  = Array.isArray(anyEntity['terms']) ? anyEntity['terms'] as Array<{ id: string; name: string; canonical: string }> : [];
-    const refs   = entity.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
     const body   = entity.body as unknown as Array<Record<string, unknown>>;
-    return [...termItems(terms), ...claimItems(body), ...refItems(refs)];
+    return [...termItems(terms), ...claimItems(body), ...refItems(entity.references)];
   }
 
   function entityToTree(entity: Definition | Theorem | Proof | Remark): ContentTreeItem {
@@ -1204,16 +1144,12 @@ export function buildContentTree(content: LoadedContent): Pick<GetContentTreeRes
     children: book.parts.map(part => ({
       id: part.id, type: 'part', label: part.title, isFileBacked: part.filePath !== null,
       children: part.chapters.map(chapter => {
-        const chRefs = chapter.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
         const chChildren: ContentTreeItem[] = [
-          ...(chRefs.length ? [group(`${chapter.id}:_refs`, 'References', refItems(chRefs))] : []),
-          ...chapter.sections.map(section => {
-            const secRefs = section.references as Array<{ id: string; name: string; display: string; target: { target: string } }>;
-            return {
-              id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
-              children: refItems(secRefs),
-            };
-          }),
+          ...(chapter.references.entries.length ? [group(`${chapter.id}:_refs`, 'References', refItems(chapter.references))] : []),
+          ...chapter.sections.map(section => ({
+            id: section.id, type: 'section' as const, label: section.title, isFileBacked: section.filePath !== null,
+            children: refItems(section.references),
+          })),
         ];
         return { id: chapter.id, type: 'chapter', label: chapter.title, isFileBacked: chapter.filePath !== null, children: chChildren };
       }),

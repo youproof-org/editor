@@ -10,9 +10,10 @@ interface Props {
   title:  string;
   isDirty: boolean;
   entityLabel?: EntityLabelProps;
+  hasReferencesDictionary: boolean;
 }
 
-export default function EntityHeader({ nodeId, type, title, isDirty, entityLabel }: Props) {
+export default function EntityHeader({ nodeId, type, title, isDirty, entityLabel, hasReferencesDictionary }: Props) {
   const client = useClient();
   const { onLabelChange } = useTermEditingContext();
   const badge = badgeChar(type);
@@ -25,6 +26,12 @@ export default function EntityHeader({ nodeId, type, title, isDirty, entityLabel
       </div>
       {entityLabel && <EntityLabelPicker {...entityLabel} onChange={onLabelChange} />}
       {entityLabel && <EntityLabelHints {...entityLabel} />}
+      {hasReferencesDictionary && (
+        <div className="field-hint">
+          This file still has a <code>references</code> dictionary, which the site no longer accepts. Saving is
+          refused until it is converted to a list in the YAML file and the content is reloaded.
+        </div>
+      )}
       <button
         className="open-file-btn"
         onClick={() => client.request('openContentObjectFile', { id: nodeId } as OpenContentObjectFileRequest).catch(console.error)}

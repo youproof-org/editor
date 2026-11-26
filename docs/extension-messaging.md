@@ -62,7 +62,7 @@ interface ContentTreeItem {
   type:        NodeType | 'group' | 'reference' | 'term' | 'claim';
   label:       string;
   isFileBacked: boolean;           // false for inline items (terms, refs, claims, groups)
-  targetId?:   string;             // set for 'reference' nodes
+  targetId?:   string;             // set for 'reference' nodes: the model ID of the item's first target, when it resolves
   children:    ContentTreeItem[];
 }
 ```
@@ -99,6 +99,7 @@ interface ContentObjectBase {
   name:       string;
   title?:     string;
   selectedId: string | null;   // currently selected object ID, from extension host state
+  hasReferencesDictionary?: boolean;   // the file still has the old keyed `references` dictionary; saving it is refused
 }
 
 // definition | theorem | proof | remark — carry the entity's label variant
@@ -120,7 +121,6 @@ interface ContentDefinitionData extends ContentObjectBase, ContentEntityLabelFie
   type: 'definition';
   namespacePath: string;
   terms:      ContentTerm[];
-  references: ContentReference[];
   body:       ContentBlock[];
 }
 // (theorem and remark follow the same shape with type: 'theorem' | 'remark')
@@ -129,14 +129,12 @@ interface ContentDefinitionData extends ContentObjectBase, ContentEntityLabelFie
 interface ContentProofData extends ContentObjectBase, ContentEntityLabelFields {
   type: 'proof';
   namespacePath: string;
-  references: ContentReference[];
   body:       ContentBlock[];
 }
 
 // chapter — no body, four named block arrays
 interface ContentChapterData extends ContentObjectBase {
   type: 'chapter';
-  references:          ContentReference[];
   abstract:            ContentBlock[];
   prerequisiteWarning: ContentBlock[];
   prologue:            ContentBlock[];
@@ -146,7 +144,6 @@ interface ContentChapterData extends ContentObjectBase {
 // section — like proof but no namespacePath
 interface ContentSectionData extends ContentObjectBase {
   type: 'section';
-  references: ContentReference[];
   body:       ContentBlock[];
 }
 
@@ -159,14 +156,7 @@ interface ContentTerm {
   synonyms:  string[];
 }
 
-interface ContentReference {
-  id:        string;
-  name:      string;
-  display:   string;
-  targetId?: string;   // resolved model ID of the referenced object
-}
-
-// Resolved metadata for each reference target, keyed by targetId
+// Resolved metadata for each embed target, keyed by targetId
 interface ContentTargetObject {
   id:    string;
   type:  string;   // 'definition' | 'theorem' | 'proof' | 'remark' | 'chapter' | 'section' | 'term' | 'claim' | 'external'
@@ -175,6 +165,8 @@ interface ContentTargetObject {
 ```
 
 `ContentBlock` is a discriminated union of 11 block types (see `extension/media/src/shared/types.ts`): `narrative`, `formula`, `claim`, `ordered-list`, `unordered-list`, `typewriter`, `quote`, `figure`, `subsection`, `details`, `embed`.
+
+A content object carries no references. The host reads each file's `references` list with the site build's reader (`readReferences` in `@youproof.org/display-templates`), and a save writes the list back exactly as it was loaded, so it stays in step with the `[i]` tokens the text holds.
 
 A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a term, `name` is the English id a reference resolves against and `slug` is the localized anchor segment, `''` when the file has none — legal content, since the site falls back to `name`. A save is refused if a non-empty slug is not lowercase kebab-case, or if two claims (or two terms) on one node resolve to the same anchor.
 
@@ -187,13 +179,12 @@ A `claim` carries `name`, `slug`, `content` and an optional `formula`. As on a t
 **Params:** discriminated union on `entityType`
 
 ```typescript
-// definition | theorem | remark — carry terms and references
+// definition | theorem | remark — carry terms
 interface SaveDefinitionParams {
   id:         string;
   entityType: 'definition' | 'theorem' | 'remark';
   body:       ContentBlock[];
   terms:      ContentTerm[];
-  references: ContentReference[];
   label?:     string;   // omitted for the type's default, which removes `label` from the file
 }
 
@@ -202,7 +193,6 @@ interface SaveProofOrSectionParams {
   id:         string;
   entityType: 'proof' | 'section';
   body:       ContentBlock[];
-  references: ContentReference[];
   label?:     string;   // proof only
 }
 
@@ -214,7 +204,6 @@ interface SaveChapterParams {
   prerequisiteWarning: ContentBlock[];
   prologue:            ContentBlock[];
   epilogue:            ContentBlock[];
-  references:          ContentReference[];
 }
 ```
 
@@ -223,8 +212,8 @@ interface SaveChapterParams {
 The extension host:
 1. Looks up the YAML file path from `content.idToFilePath.get(id)`.
 2. Reads the existing YAML from disk and merges the wire blocks back using `blockToYaml` / `mergeBlocks` (which preserves `embed` blocks verbatim from the original YAML, since their target references are runtime-generated IDs that cannot be reconstructed from the wire format).
-3. Writes the updated YAML back to disk with `lineWidth: 120`.
-4. Updates the in-memory model in-place: `updateModelBlocks` patches editable block fields; `updateModelTerms` and `updateModelRefs` add, update, and remove term/reference entries in the cached model and keep `idToObject` consistent.
+3. Writes the updated YAML back to disk with `lineWidth: 120`, with the `references` section put back exactly as it was loaded. A file that still has a `references` dictionary or a `labels` block is refused before anything is written.
+4. Updates the in-memory model in-place: `updateModelBlocks` patches editable block fields; `updateModelTerms` adds, updates, and removes term entries in the cached model and keeps `idToObject` consistent.
 5. Calls `PanelManager.setDirty(id, false)` (internal method) which removes the `●` prefix from the tab title.
 
 ---

@@ -5,15 +5,17 @@ import type {
   LoadedContent,
   Book, Part, Chapter, Section,
   Namespace, Definition, Theorem, Proof, Remark,
-  Term, Reference, RefTarget, RefTargetType, RefParent,
+  Term, RefTarget, RefTargetType, RefParent, FileReferences, ReferenceEntry,
   ContentBlock, BlockParent,
   SubsectionBlock, DetailsBlock, EmbedBlock,
   EntityLabelFields,
 } from './model';
 import { isExternalTarget, parseFqn, type FqnStep, type RefTargetKind } from '@youproof.org/content-model';
+import { fileReferenceTexts, readReferences, referenceTokens, type ReferenceFileKind } from '@youproof.org/display-templates';
 import { normalizeStrings } from './normalize';
 import { collectBlockText } from '../protocol/blockText';
 import { maskFormulas } from '../protocol/formula';
+import { referencesSection } from './references';
 
 // Structural YAML files (a directory's own content object) — excluded when
 // scanning a directory for child section files, which are matched by `name`.
@@ -22,6 +24,8 @@ const STRUCTURAL_YAML_FILES = new Set([
   'article.yaml', 'newsletter.yaml', 'page.yaml', 'landing.yaml',
   'namespace.yaml',
 ]);
+
+const noReferences = (): FileReferences => ({ entries: [], tokens: [], source: null, isDictionary: false });
 
 // ─── ID generation ────────────────────────────────────────────────────────────
 
@@ -140,18 +144,13 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
 
   // ─── Term / Reference / Block loading ────────────────────────────────────────
 
-  function sortByFirstOccurrence<T extends { name: string }>(
-    items: T[], text: string, type: 'ref' | 'term',
-  ): T[] {
+  function sortTermsByFirstOccurrence(terms: Term[], text: string): Term[] {
     const masked = maskFormulas(text);
     const pos = (name: string): number => {
-      const re = type === 'ref'
-        ? new RegExp(`(?<!\\[)\\[${name}\\](?!\\])`)
-        : new RegExp(`\\[\\[${name}\\]\\]`);
-      const m = re.exec(masked);
+      const m = new RegExp(`\\[\\[${name}\\]\\]`).exec(masked);
       return m !== null ? m.index : Infinity;
     };
-    return [...items].sort((a, b) => pos(a.name) - pos(b.name));
+    return [...terms].sort((a, b) => pos(a.name) - pos(b.name));
   }
 
   function loadTerms(rawMap: unknown, parent: Definition | Theorem | Remark): Term[] {
@@ -184,17 +183,28 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
     pending.push({ set, raw: rawTarget });
   }
 
-  function loadRefs(rawMap: unknown, parent: RefParent): Reference[] {
-    if (!rawMap || typeof rawMap !== 'object' || Array.isArray(rawMap)) return [];
-    return Object.entries(rawMap as Record<string, unknown>).flatMap(([key, v]) => {
-      if (!v || typeof v !== 'object' || Array.isArray(v)) return [];
-      const obj = v as Record<string, unknown>;
-      const id  = genId();
-      const ref: Reference = { id, name: key, display: str(obj, 'display', ''), target: { type: 'external', target: '' }, parent };
-      reg(id, ref);
-      enqueueTarget(obj['target'], r => { ref.target = r; });
-      return [ref];
+  // Read with the site build's reader from the file as YAML parses it, before
+  // normalizeStrings, so the items, the texts their tokens sit in and the order
+  // are the ones the site reads.
+  function loadReferences(filePath: string, kind: ReferenceFileKind, parent: RefParent): FileReferences {
+    const source = fs.readFileSync(filePath, 'utf-8');
+    const parsed = yaml.load(source);
+    const file = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    const list = file['references'];
+    const texts = fileReferenceTexts(file, kind);
+    const { references } = readReferences(list, { locale: parent.locale, templates: {}, texts });
+    const tokens = texts.flatMap((text) => [...referenceTokens(text)].flatMap((token) => token.kind === 'ref' ? [token.index] : []));
+    const entries = references.map((item, index): ReferenceEntry => {
+      const entry: ReferenceEntry = { id: genId(), index, item, targets: [], parent };
+      reg(entry.id, entry);
+      for (const [k, target] of (item?.targets ?? []).entries()) {
+        entry.targets.push({ type: 'unresolved', target: '' });
+        enqueueTarget(target.type === 'external' ? target.url : target.fqn, r => { entry.targets[k] = r; });
+      }
+      return entry;
     });
+    const isDictionary = list !== null && typeof list === 'object' && !Array.isArray(list);
+    return { entries, tokens, source: referencesSection(source), isDictionary };
   }
 
   function loadBlocks(rawList: unknown, parent: BlockParent): ContentBlock[] {
@@ -329,17 +339,15 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         id, filePath: chapterYaml, type: 'chapter',
         name: chapterName, title: str(data, 'title', chapterName), locale: localeOf(data),
         thumbnail: parseLogo(data['thumbnail']),
-        references: [], abstract: [], prerequisiteWarning: [],
+        references: noReferences(), abstract: [], prerequisiteWarning: [],
         prologue: [], sections: [], epilogue: [], part,
       };
       registerFile(id, chapterYaml); reg(id, chapter); regRef(chapterKey(bookName, partName, chapterName), id);
-      chapter.references          = loadRefs(data['references'], chapter);
+      chapter.references          = loadReferences(chapterYaml, 'chapter', chapter);
       chapter.abstract            = loadBlocks(data['abstract'], chapter);
       chapter.prerequisiteWarning = loadBlocks(data['prerequisite-warning'], chapter);
       chapter.prologue            = loadBlocks(data['prologue'], chapter);
       chapter.epilogue            = loadBlocks(data['epilogue'], chapter);
-      const chText = collectBlockText([...chapter.abstract, ...chapter.prerequisiteWarning, ...chapter.prologue, ...chapter.epilogue]);
-      chapter.references = sortByFirstOccurrence(chapter.references, chText, 'ref');
       chapter.sections = strArr(data, 'sections')
         .map(s => loadSection(chapterDir, s, chapterName, partName, bookName, chapter))
         .filter((s): s is Section => s !== null);
@@ -359,12 +367,11 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       const section: Section = {
         id, filePath: sectionFile, type: 'section',
         name: sectionName, title: str(data, 'title', sectionName), locale: localeOf(data),
-        references: [], body: [], chapter,
+        references: noReferences(), body: [], chapter,
       };
       registerFile(id, sectionFile); reg(id, section); regRef(sectionKey(bookName, partName, chapterName, sectionName), id);
-      section.references = loadRefs(data['references'], section);
+      section.references = loadReferences(sectionFile, 'section', section);
       section.body       = loadBlocks(data['body'], section);
-      section.references = sortByFirstOccurrence(section.references, collectBlockText(section.body), 'ref');
       return section;
     } catch { return null; }
   }
@@ -474,15 +481,14 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
           id, filePath, type: 'definition', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
           ...readLabelFields(data),
-          terms: [], references: [], body: [], remarks: [], namespace,
+          terms: [], references: noReferences(), body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, def); regRef(key, id);
         def.terms      = loadTerms(data['terms'], def);
-        def.references = loadRefs(data['references'], def);
+        def.references = loadReferences(filePath, 'entity', def);
         def.body       = loadBlocks(data['body'], def);
         const defText  = collectBlockText(def.body);
-        def.terms      = sortByFirstOccurrence(def.terms,      defText, 'term');
-        def.references = sortByFirstOccurrence(def.references, defText, 'ref');
+        def.terms      = sortTermsByFirstOccurrence(def.terms, defText);
         remarkNames.set(id, strArr(data, 'remarks'));
         return def;
       }
@@ -492,15 +498,14 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
           id, filePath, type: 'theorem', name, namespacePath: nsPath, locale: localeOf(data),
           title: data['title'] as string | undefined,
           ...readLabelFields(data),
-          terms: [], references: [], body: [], proofs: [], remarks: [], namespace,
+          terms: [], references: noReferences(), body: [], proofs: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, thm); regRef(key, id);
         thm.terms      = loadTerms(data['terms'], thm);
-        thm.references = loadRefs(data['references'], thm);
+        thm.references = loadReferences(filePath, 'entity', thm);
         thm.body       = loadBlocks(data['body'], thm);
         const thmText  = collectBlockText(thm.body);
-        thm.terms      = sortByFirstOccurrence(thm.terms,      thmText, 'term');
-        thm.references = sortByFirstOccurrence(thm.references, thmText, 'ref');
+        thm.terms      = sortTermsByFirstOccurrence(thm.terms, thmText);
         proofNames.set(id, strArr(data, 'proofs'));
         remarkNames.set(id, strArr(data, 'remarks'));
         return thm;
@@ -510,12 +515,11 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
         const proof: Proof = {
           id, filePath, type: 'proof', name, namespacePath: nsPath, locale: localeOf(data),
           ...readLabelFields(data),
-          references: [], body: [], remarks: [], namespace,
+          references: noReferences(), body: [], remarks: [], namespace,
         };
         registerFile(id, filePath); reg(id, proof); regRef(key, id);
-        proof.references = loadRefs(data['references'], proof);
+        proof.references = loadReferences(filePath, 'entity', proof);
         proof.body       = loadBlocks(data['body'], proof);
-        proof.references = sortByFirstOccurrence(proof.references, collectBlockText(proof.body), 'ref');
         remarkNames.set(id, strArr(data, 'remarks'));
         return proof;
       }
@@ -524,15 +528,14 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       const rem: Remark = {
         id, filePath, type: 'remark', name, namespacePath: nsPath, locale: localeOf(data),
         ...readLabelFields(data),
-        terms: [], references: [], body: [], namespace,
+        terms: [], references: noReferences(), body: [], namespace,
       };
       registerFile(id, filePath); reg(id, rem); regRef(key, id);
       rem.terms      = loadTerms(data['terms'], rem);
-      rem.references = loadRefs(data['references'], rem);
+      rem.references = loadReferences(filePath, 'entity', rem);
       rem.body       = loadBlocks(data['body'], rem);
       const remText  = collectBlockText(rem.body);
-      rem.terms      = sortByFirstOccurrence(rem.terms,      remText, 'term');
-      rem.references = sortByFirstOccurrence(rem.references, remText, 'ref');
+      rem.terms      = sortTermsByFirstOccurrence(rem.terms, remText);
       return rem;
     } catch { return null; }
   }

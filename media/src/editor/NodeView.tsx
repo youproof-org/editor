@@ -52,6 +52,7 @@ export default function NodeView({ nodeId }: Props) {
               locale: draft.locale, type: draft.type, label: draft.label, hasLabelsBlock: draft.hasLabelsBlock ?? false,
               labelVariants: draft.labelVariants, labelRegistryError: draft.labelRegistryError,
             }}
+            hasReferencesDictionary={draft.hasReferencesDictionary ?? false}
           />
           <div className="blocks">
             <EntityBody draft={draft} setDraft={setDraft} markDirty={markDirty} />

@@ -33,10 +33,10 @@ Module._load = function (request, ...rest) {
 
 const {
   saveFromModel,
-  serializeRefs, updateModelRefs,
   serializeTerms, updateModelTerms,
   serializeBlocks, updateModelBlocks,
   loadContent,
+  referencesSection,
 } = await import('../out/test/host.js')
 
 const NS = 'namespace.yaml'
@@ -66,38 +66,26 @@ slug: fejezet
 locale: hu
 title: Fejezet
 references:
-  a-definition:
-    display: "[definíció]"
-    target: definitions.proba-definicio
-  a-claim:
-    display: "[állítás]"
-    target: definitions.proba-definicio.claims.top-level-claim
-  a-proof:
-    display: "[bizonyítás]"
-    target: theorems.proba-tetel.proofs.proba-bizonyitas
-  a-remark:
-    display: "[megjegyzés]"
-    target: definitions.proba-definicio.remarks.proba-megjegyzes
-  a-remark-term:
-    display: "[megjegyzés-fogalom]"
-    target: definitions.proba-definicio.remarks.proba-megjegyzes.terms.remark-term
-  a-page:
-    display: "[Impresszum]"
-    target: pages.impresszum
-  a-book:
-    display: "[Könyv]"
-    target: books.konyv
-  a-url:
-    display: "Link"
-    target: https://example.org/x
-  a-mail:
-    display: "Mail"
-    target: mailto:hello@youproof.org
+  - { text: '[definíció]', target: definitions.proba-definicio }
+  - { text: '[állítás]', target: definitions.proba-definicio.claims.top-level-claim }
+  - { text: '[bizonyítás]', target: theorems.proba-tetel.proofs.proba-bizonyitas }
+  - { text: '[megjegyzés]', target: definitions.proba-definicio.remarks.proba-megjegyzes }
+  - { text: '[megjegyzés-fogalom]', target: definitions.proba-definicio.remarks.proba-megjegyzes.terms.remark-term }
+  - { text: '[Impresszum]', target: pages.impresszum }
+  - { text: '[Könyv]', target: books.konyv }
+  - { text: '[Link]', target: "https://example.org/x" }
+  - { text: '[Mail]', target: "mailto:hello@youproof.org" }
 prologue:
   - type: narrative
     content: >-
-      Lásd [a-definition], [a-claim], [a-proof], [a-remark], [a-remark-term],
-      [a-page], [a-book], [a-url], [a-mail].
+      Lásd [0], [1], [2], [3], [4],
+      [5], [6], [7], [8].
+  - type: embed
+    target: definitions.proba-definicio
+  - type: embed
+    target: theorems.proba-tetel.proofs.proba-bizonyitas
+  - type: embed
+    target: definitions.proba-definicio.remarks.proba-megjegyzes
 sections: []
 `)
 
@@ -119,7 +107,7 @@ terms:
     slug: masodik-fogalom
     display: "[második fogalom]"
     canonical: második fogalom
-references: {}
+references: []
 body:
   - type: narrative
     content: Bevezető [[first-term]] szöveg.
@@ -147,7 +135,7 @@ label: lemma
 proofs:
   - proba-bizonyitas
 remarks: []
-references: {}
+references: []
 body:
   - type: narrative
     content: Tétel szöveg.
@@ -163,7 +151,7 @@ terms:
     slug: bizonyitas-fogalom
     display: "[bizonyítás-fogalom]"
     canonical: bizonyítás-fogalom
-references: {}
+references: []
 body:
   - type: narrative
     content: Bizonyítás szöveg.
@@ -181,7 +169,7 @@ terms:
     slug: megjegyzes-fogalom
     display: "[megjegyzés-fogalom]"
     canonical: megjegyzés-fogalom
-references: {}
+references: []
 body:
   - type: narrative
     content: Megjegyzés szöveg.
@@ -204,7 +192,7 @@ function saveAll(root) {
 
 /**
  * The same, but through the FULL webview round trip that Ctrl+S goes through:
- * every block, term and reference is serialized out to the panel and fed straight
+ * every block and term is serialized out to the panel and fed straight
  * back, untouched. Saving an unedited node this way must be a no-op.
  *
  * Whole-object, not references alone, because the wire is a WHITELIST in both
@@ -227,7 +215,6 @@ function saveAllThroughPanel(root) {
       }
     }
     if (Array.isArray(obj.terms)) updateModelTerms(obj, serializeTerms(obj.terms), content.idToObject)
-    updateModelRefs(obj, serializeRefs(obj.references ?? []), content.idToObject)
     saveFromModel(id, content)
     files[path.relative(root, fp)] = readFileSync(fp, 'utf8')
   }
@@ -473,121 +460,183 @@ test('a claim and a term on one node MAY share a slug', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Reference targets
+// References
+//
+// The editor reads each file's `references` list with the site build's reader and
+// can't edit references yet, so a save writes the list back exactly as it was
+// loaded and leaves the `[i]` tokens in the text as they are. A keyed dictionary,
+// the format the list replaced, is refused like a `labels` block.
 // ---------------------------------------------------------------------------
 
-const chapterDoc = (files) =>
-  doc(files[path.join('books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')])
+const CHAPTER_REL = path.join('books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
+const chapterDoc = (files) => doc(files[CHAPTER_REL])
+const chapterOf = (content) => [...content.idToObject.values()].find((o) => o.type === 'chapter')
 
-test('a resolvable target is rewritten as the same fully qualified name', () => {
-  const root = fixture()
-  const refs = chapterDoc(saveAll(root)).references
-  // Rebuilt from the object graph, not echoed — which is what lets a path follow a
-  // rename. Landing on the identical string is the point.
-  assert.equal(refs['a-definition'].target, 'definitions.proba-definicio')
-  assert.equal(refs['a-claim'].target, 'definitions.proba-definicio.claims.top-level-claim')
-  assert.equal(refs['a-proof'].target, 'theorems.proba-tetel.proofs.proba-bizonyitas')
-  // A remark, and a term inside one. The owner search behind these has to skip the
-  // NAMESPACE, which also lists every remark in its folder — picking the namespace
-  // ends the walk on a segment the grammar has no name for, and the target is then
-  // written back as no target at all.
-  assert.equal(refs['a-remark'].target, 'definitions.proba-definicio.remarks.proba-megjegyzes')
-  assert.equal(refs['a-remark-term'].target,
-    'definitions.proba-definicio.remarks.proba-megjegyzes.terms.remark-term')
+test('the references section is the key and its lines, up to the next top-level key', () => {
+  const list = "references:\n  - { text: '[a]', target: definitions.a }\n  - { text: '[b]', target: definitions.b }\n"
+  assert.equal(referencesSection(`type: section\n${list}body: []\n`), list)
+  assert.equal(referencesSection(`type: section\n${list}\n\nbody: []\n`), list, 'trailing blank lines belong to no key')
+  assert.equal(referencesSection(`type: section\n${list.trimEnd()}`), list, 'a list at the end of the file')
+  assert.equal(referencesSection('references: []\nbody: []\n'), 'references: []\n')
+  assert.equal(referencesSection('references:\n- { text: a, target: definitions.a }\nbody: []\n'),
+    'references:\n- { text: a, target: definitions.a }\n', 'items at the indentation of the key')
+  assert.equal(referencesSection('type: section\nbody: []\n'), null)
 })
 
-test('an external target survives, including a scheme with no slashes', () => {
+test('the references list and its tokens are written back byte for byte', () => {
   const root = fixture()
-  const refs = chapterDoc(saveAll(root)).references
-  assert.equal(refs['a-url'].target, 'https://example.org/x')
-  // `mailto:` has no `//`, which is why the internal/external test is a scheme test.
-  assert.equal(refs['a-mail'].target, 'mailto:hello@youproof.org')
-})
-
-test('a target this editor cannot model survives a save', () => {
-  // The regression this exists for: the editor loads only books and the knowledge
-  // base, so an article/page/landing/book reference has nothing to resolve to. It
-  // used to load as an empty external and be written back with NO target at all —
-  // silently deleting it. Verified against the real content: 13 such references
-  // exist today.
-  const root = fixture()
-  const refs = chapterDoc(saveAll(root)).references
-  assert.equal(refs['a-page'].target, 'pages.impresszum', 'a page reference must not be dropped')
-  assert.equal(refs['a-book'].target, 'books.konyv', 'a book reference must not be dropped')
-})
-
-test('a path the content model forbids is kept as authored, not resolved', () => {
-  // Well formed, but a proof holds no numbered claims. The shared grammar rejects
-  // it, so it stays unresolved and is written back verbatim for the build to report.
-  const root = fixture()
-  const illegal = 'theorems.proba-tetel.proofs.proba-bizonyitas.claims.proof-claim'
-  const chapterFile = path.join(root, 'books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
-  writeFileSync(chapterFile, readFileSync(chapterFile, 'utf8')
-    .replace('    target: books.konyv\n', `    target: books.konyv\n  a-proof-claim:\n    display: "[állítás]"\n    target: ${illegal}\n`)
-    .replace('[a-mail].', '[a-mail], [a-proof-claim].'))
-  const content = loadContent(root, 'hu')
-  const chapter = [...content.idToObject.values()].find((o) => o.type === 'chapter')
-  const ref = chapter.references.find((r) => r.name === 'a-proof-claim')
-  assert.deepEqual(ref.target, { type: 'unresolved', target: '', fqn: illegal })
-  assert.equal(chapterDoc(saveAll(root)).references['a-proof-claim'].target, illegal)
-})
-
-test('a reference target is never silently dropped', () => {
-  const root = fixture()
-  const refs = chapterDoc(saveAll(root)).references
-  for (const [key, entry] of Object.entries(refs)) {
-    assert.ok(entry.target, `reference '${key}' lost its target`)
+  const file = path.join(root, CHAPTER_REL)
+  const before = readFileSync(file, 'utf8')
+  for (const save of [saveAll, saveAllThroughPanel]) {
+    const after = save(root)[CHAPTER_REL]
+    assert.equal(referencesSection(after), referencesSection(before), save.name)
+    assert.equal(doc(after).prologue[0].content, doc(before).prologue[0].content, save.name)
   }
 })
 
-test('a file with an unmigrated target refuses to save, rather than dropping it', () => {
-  // The window this guards: between the editor learning path targets and the
-  // content being migrated to them, every target in the content is still a
-  // composite object this editor cannot write back. Skipping it would delete it on
-  // save -- which is exactly what happened once, and what this refuses to repeat.
+test('each item is read as the site reads it, with its targets resolved against the loaded content', () => {
+  const content = loadContent(fixture(), 'hu')
+  const { entries, tokens, isDictionary } = chapterOf(content).references
+  assert.equal(isDictionary, false)
+  assert.deepEqual(tokens, [0, 1, 2, 3, 4, 5, 6, 7, 8])
+  assert.deepEqual(entries.map((e) => e.index), [0, 1, 2, 3, 4, 5, 6, 7, 8])
+  assert.deepEqual(entries[0].item, { text: '[definíció]', targets: [{
+    type: 'definition', name: 'proba-definicio', fqn: 'definitions.proba-definicio', parentFqn: '', parentKind: null,
+  }] })
+  const kinds = entries.map((e) => e.targets.map((t) => t.type))
+  assert.deepEqual(kinds, [['definition'], ['claim'], ['proof'], ['remark'], ['term'], ['unresolved'], ['book'], ['external'], ['external']])
+  for (const entry of entries.slice(0, 5)) {
+    assert.equal(content.idToObject.get(entry.targets[0].target)?.name, entry.item.targets[0].name, `[${entry.index}]`)
+  }
+  assert.equal(entries[5].targets[0].fqn, 'pages.impresszum', 'a target the editor does not model keeps its path')
+  assert.equal(entries[8].targets[0].target, 'mailto:hello@youproof.org')
+})
+
+test('tokens are read in the order the site renders the text, through a figure caption, a quote and a details title', () => {
   const root = fixture()
-  const legacy = path.join(root, 'books', 'konyv', 'resz', 'fejezet', 'chapter.yaml')
-  writeFileSync(legacy, `type: chapter
+  const chapterDir = path.join(root, 'books', 'konyv', 'resz', 'fejezet')
+  const chapterFile = path.join(chapterDir, 'chapter.yaml')
+  writeFileSync(chapterFile, readFileSync(chapterFile, 'utf8').replace('sections: []\n', 'sections:\n  - szakasz\n'))
+  const sectionFile = path.join(chapterDir, '01-szakasz.yaml')
+  writeFileSync(sectionFile, `type: section
+name: szakasz
+slug: szakasz
+locale: hu
+title: Szakasz
+references:
+  - { text: '[a]', target: definitions.proba-definicio }
+  - { text: '[b]', target: definitions.proba-definicio }
+  - { text: '[c]', target: definitions.proba-definicio }
+  - { text: '[d]', target: definitions.proba-definicio }
+  - { text: '[e]', target: definitions.proba-definicio }
+  - { text: '[f]', target: definitions.proba-definicio }
+body:
+  - type: narrative
+    content: Előbb [0], és $[0]_3$ nem hivatkozás.
+  - type: figure
+    src: abra.png
+    caption: Ábra [1] felirata.
+  - type: quote
+    lead-in: Idézet előtt [2].
+    quote: Az idézet [3].
+  - type: details
+    title: Részletek [4]
+    blocks:
+      - type: narrative
+        content: Benne **[5]**.
+`)
+  const before = readFileSync(sectionFile, 'utf8')
+  const content = loadContent(root, 'hu')
+  const id = content.filePathToId.get(sectionFile)
+  assert.deepEqual(content.idToObject.get(id).references.tokens, [0, 1, 2, 3, 4, 5])
+  saveFromModel(id, content)
+  const after = readFileSync(sectionFile, 'utf8')
+  assert.equal(referencesSection(after), referencesSection(before))
+  assert.deepEqual(doc(after).body, doc(before).body)
+})
+
+test('an item the reader cannot read is kept in the list, and saving keeps it', () => {
+  const root = fixture()
+  const file = path.join(root, CHAPTER_REL)
+  writeFileSync(file, readFileSync(file, 'utf8')
+    .replace('prologue:\n', '  - { target: theorems.proba-tetel.proofs.proba-bizonyitas.claims.proof-claim }\nprologue:\n')
+    .replace('[8].', '[8], [9].'))
+  const before = readFileSync(file, 'utf8')
+  const content = loadContent(root, 'hu')
+  const chapter = chapterOf(content)
+  assert.equal(chapter.references.entries.length, 10)
+  assert.equal(chapter.references.entries[9].item, undefined, 'neither display nor text')
+  saveFromModel(chapter.id, content)
+  assert.equal(referencesSection(readFileSync(file, 'utf8')), referencesSection(before))
+})
+
+test('a file with a references dictionary refuses to save, and the file is left untouched', () => {
+  const root = fixture()
+  const file = path.join(root, CHAPTER_REL)
+  writeFileSync(file, `type: chapter
 name: fejezet
 slug: fejezet
 locale: hu
 title: Fejezet
 references:
-  old-shape:
+  a-definition:
     display: "[definíció]"
+    target: definitions.proba-definicio
+prologue:
+  - type: narrative
+    content: Lásd [a-definition].
+sections: []
+`)
+  const before = readFileSync(file, 'utf8')
+  const content = loadContent(root, 'hu')
+  const chapter = chapterOf(content)
+  assert.equal(chapter.references.isDictionary, true)
+  assert.deepEqual(chapter.references.entries, [])
+  assert.throws(() => saveFromModel(chapter.id, content), /still has a 'references' dictionary/)
+  assert.equal(readFileSync(file, 'utf8'), before, 'nothing was written')
+})
+
+// ---------------------------------------------------------------------------
+// Embed targets
+// ---------------------------------------------------------------------------
+
+const embedTargets = (files) =>
+  chapterDoc(files).prologue.filter((b) => b.type === 'embed').map((b) => b.target)
+
+test('an embed target is rewritten as the same fully qualified name, saving through the panel', () => {
+  // On the wire an embed target is only an ID, so the path is rebuilt by walking
+  // the object graph. The owner search behind a remark has to skip the NAMESPACE,
+  // which also lists every remark in its folder: picking the namespace ends the
+  // walk on a segment the grammar has no name for, and the target is then written
+  // back as no target at all.
+  const authored = [
+    'definitions.proba-definicio',
+    'theorems.proba-tetel.proofs.proba-bizonyitas',
+    'definitions.proba-definicio.remarks.proba-megjegyzes',
+  ]
+  assert.deepEqual(embedTargets(saveAll(fixture())), authored)
+  assert.deepEqual(embedTargets(saveAllThroughPanel(fixture())), authored)
+})
+
+test('a file with an unmigrated embed target refuses to save, rather than dropping it', () => {
+  const root = fixture()
+  const file = path.join(root, CHAPTER_REL)
+  writeFileSync(file, `type: chapter
+name: fejezet
+slug: fejezet
+locale: hu
+title: Fejezet
+prologue:
+  - type: embed
     target:
       type: definition
       namespace: /proba
       name: proba-definicio
-prologue: []
 sections: []
 `)
   const content = loadContent(root, 'hu')
-  const id = content.filePathToId.get(legacy)
-  assert.throws(() => saveFromModel(id, content), /cannot write back|Saving would delete/)
-  // And the file on disk is untouched, which is the point.
-  assert.match(readFileSync(legacy, 'utf8'), /type: definition/)
-})
-
-test('a reference target is never silently dropped, saving through the panel', () => {
-  // The regression this exists for: on the wire a target is only an ID, so the
-  // authored path is gone by the time the file is written and every target has to
-  // be rebuilt by walking the object graph. A remark target could not be — the walk
-  // found the namespace that lists the remark instead of the definition that owns
-  // it — so opening a file and pressing Ctrl+S deleted it. 98 files in the content
-  // repo carry such a target.
-  const root = fixture()
-  for (const [rel, text] of Object.entries(saveAllThroughPanel(root))) {
-    for (const [key, entry] of Object.entries(doc(text).references ?? {})) {
-      assert.ok(entry.target, `${rel}: reference '${key}' lost its target`)
-    }
-  }
-})
-
-test('saving through the panel writes the same paths as saving from the model', () => {
-  const direct = chapterDoc(saveAll(fixture())).references
-  const panel  = chapterDoc(saveAllThroughPanel(fixture())).references
-  assert.deepEqual(panel, direct)
+  assert.throws(() => saveFromModel(chapterOf(content).id, content), /cannot write back|Saving would delete/)
+  assert.match(readFileSync(file, 'utf8'), /type: definition/)
 })
 
 // ---------------------------------------------------------------------------

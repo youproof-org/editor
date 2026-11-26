@@ -1,3 +1,5 @@
+import type { ReferenceItem } from '@youproof.org/display-templates';
+
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
 export type NodeType =
@@ -63,16 +65,35 @@ export interface RefTarget {
   fqn?: string;
 }
 
-// ─── Reference (inline, no file) ─────────────────────────────────────────────
+// ─── References (inline, no file) ────────────────────────────────────────────
 
 export type RefParent = Chapter | Section | Definition | Theorem | Proof | Remark;
 
-export interface Reference {
+/** One item of a file's `references` list, which the text cites as `[i]`. */
+export interface ReferenceEntry {
   id: string;
-  name: string;
-  display: string;
-  target: RefTarget;
+  /** The item's index in the list: the `i` of the `[i]` token that cites it. */
+  index: number;
+  /** The item as the site build reads it, or undefined when it can't be read. */
+  item: ReferenceItem | undefined;
+  /** The item's targets resolved against the loaded content, in the item's order. */
+  targets: RefTarget[];
   parent: RefParent;
+}
+
+/**
+ * A file's references, read with the site build's reader. Until the editor can
+ * edit references, a save writes `source` back unchanged and leaves the `[i]`
+ * tokens in the text as they are, so the list and the tokens stay in step.
+ */
+export interface FileReferences {
+  entries: ReferenceEntry[];
+  /** The index each `[i]` token cites, in the order the site renders the text, as loaded. */
+  tokens: number[];
+  /** The `references` section exactly as the file had it when loaded, or null when it has none. */
+  source: string | null;
+  /** The file still has the keyed dictionary the list replaced, which the site rejects. */
+  isDictionary: boolean;
 }
 
 // ─── Content blocks ───────────────────────────────────────────────────────────
@@ -152,7 +173,7 @@ export interface Chapter {
   id: string; filePath: string; type: 'chapter';
   name: string; title: string; locale: string;
   thumbnail?: { src: string; alt: string };
-  references: Reference[];
+  references: FileReferences;
   abstract: ContentBlock[];
   prerequisiteWarning: ContentBlock[];
   prologue: ContentBlock[];
@@ -164,7 +185,7 @@ export interface Chapter {
 export interface Section {
   id: string; filePath: string; type: 'section';
   name: string; title: string; locale: string;
-  references: Reference[];
+  references: FileReferences;
   body: ContentBlock[];
   chapter: Chapter;
 }
@@ -187,7 +208,7 @@ export interface Definition extends EntityLabelFields {
   name: string; namespacePath: string; locale: string;
   title?: string;
   terms: Term[];
-  references: Reference[];
+  references: FileReferences;
   body: ContentBlock[];
   remarks: Remark[];
   namespace: Namespace;
@@ -198,7 +219,7 @@ export interface Theorem extends EntityLabelFields {
   name: string; namespacePath: string; locale: string;
   title?: string;
   terms: Term[];
-  references: Reference[];
+  references: FileReferences;
   body: ContentBlock[];
   proofs: Proof[];
   remarks: Remark[];
@@ -208,7 +229,7 @@ export interface Theorem extends EntityLabelFields {
 export interface Proof extends EntityLabelFields {
   id: string; filePath: string; type: 'proof';
   name: string; namespacePath: string; locale: string;
-  references: Reference[];
+  references: FileReferences;
   body: ContentBlock[];
   remarks: Remark[];
   namespace: Namespace;
@@ -218,7 +239,7 @@ export interface Remark extends EntityLabelFields {
   id: string; filePath: string; type: 'remark';
   name: string; namespacePath: string; locale: string;
   terms: Term[];
-  references: Reference[];
+  references: FileReferences;
   body: ContentBlock[];
   namespace: Namespace;
 }
