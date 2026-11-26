@@ -2,14 +2,16 @@
   "compilerOptions": {
     "module": "commonjs",
     "target": "ES2020",
-    "outDir": "./out",
-    "rootDir": "./src",
+    "noEmit": true,
     "strict": true,
     "esModuleInterop": true,
-    "sourceMap": true,
     "lib": ["ES2020"],
     "typeRoots": ["./node_modules/@types"],
-    "types": ["node", "vscode", "js-yaml"]
+    "types": ["node", "vscode", "js-yaml"],
+    "paths": {
+      "@youproof.org/content-model": ["../services/packages/content-model/src/index.ts"],
+      "@youproof.org/display-templates": ["../services/packages/display-templates/src/index.ts"]
+    }
   },
   "include": ["src"],
   "exclude": ["node_modules", "out"]

@@ -2,6 +2,7 @@
 src/**
 media/src/**
 scripts/**
+test/**
 docs/**
 .github/**
 
@@ -16,3 +17,7 @@ tsconfig.json
 
 # VSIX artifacts
 *.vsix
+
+# Test-only bundle and generated type-check config
+out/test/**
+out/typecheck/**

@@ -16,8 +16,8 @@ Module._load = function (request, ...rest) {
 
 const {
   readServicesData, resolveServicesRoot, ServicesDataError, LOCALES_FILE, ENTITY_LABELS_FILE,
-} = await import('../out/content/servicesData.js')
-const { entityLabelFields } = await import('../out/handlers.js')
+  entityLabelFields,
+} = await import('../out/test/host.js')
 
 const LOCALES = { locales: { xx: { displayName: 'Xx' }, yy: { displayName: 'Yy' } } }
 

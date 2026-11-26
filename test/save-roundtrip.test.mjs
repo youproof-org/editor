@@ -23,7 +23,7 @@ import path from 'node:path'
 import Module from 'node:module'
 import yaml from 'js-yaml'
 
-// handlers.js requires 'vscode', which only resolves inside the extension host.
+// The host bundle requires 'vscode', which only resolves inside the extension host.
 // Nothing under test touches it, so a bare stub is enough.
 const realLoad = Module._load
 Module._load = function (request, ...rest) {
@@ -36,8 +36,8 @@ const {
   serializeRefs, updateModelRefs,
   serializeTerms, updateModelTerms,
   serializeBlocks, updateModelBlocks,
-} = await import('../out/handlers.js')
-const { loadContent } = await import('../out/content/loader.js')
+  loadContent,
+} = await import('../out/test/host.js')
 
 const NS = 'namespace.yaml'
 

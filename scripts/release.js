@@ -16,11 +16,17 @@
  * publisher -> "youproof-org" (extension id "youproof-org.editor") only while
  * running vsce, then restores the file exactly. The swap is never committed and
  * never reaches the git tag, so the GitHub source tarball keeps the npm identity.
+ *
+ * Services note: the VSIX bundles @youproof.org/content-model and
+ * @youproof.org/display-templates from a services checkout (SERVICES_DIR, else
+ * ../services). That checkout must be clean, and its commit goes into the release
+ * notes, so a release can be traced to the shared code it was built from.
  */
 
 const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { SERVICES_DIR_ENV, servicesPackages } = require('./services-dir');
 
 const RELEASE_BRANCH = 'stable/released';
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
@@ -98,12 +104,34 @@ try {
   // Re-throw only if it was our own fail() that called process.exit (it won't reach here).
 }
 
-// ─── 6. Build ──────────────────────────────────────────────────────────────────
+// ─── 6. Services checkout guard ────────────────────────────────────────────────
+
+let services;
+try {
+  services = servicesPackages();
+} catch (err) {
+  fail(err.message);
+}
+const inServices = (args) => execFileSync('git', ['-C', services.dir, ...args], { encoding: 'utf-8' }).trim();
+let servicesCommit;
+let servicesBranch;
+try {
+  servicesCommit = inServices(['rev-parse', 'HEAD']);
+  servicesBranch = inServices(['rev-parse', '--abbrev-ref', 'HEAD']);
+} catch {
+  fail(`${services.dir} is not a git checkout, so the release could not record which services commit it bundles. Set ${SERVICES_DIR_ENV} to a services clone.`);
+}
+if (inServices(['status', '--porcelain']) !== '') {
+  fail(`the services checkout at ${services.dir} is dirty. The VSIX bundles its packages, so commit or stash its changes before releasing.`);
+}
+console.log(`release: bundling services ${servicesCommit} (${servicesBranch}) from ${services.dir}`);
+
+// ─── 7. Build ──────────────────────────────────────────────────────────────────
 
 console.log(`release: building ${tag}…`);
 run('npm run build');
 
-// ─── 7. Package VSIX (with temporary name/publisher swap) ──────────────────────
+// ─── 8. Package VSIX (with temporary name/publisher swap) ──────────────────────
 
 console.log('release: packaging VSIX…');
 try {
@@ -115,13 +143,13 @@ try {
   fs.writeFileSync(pkgPath, originalPkgText);
 }
 
-// ─── 8. Tag the current commit ─────────────────────────────────────────────────
+// ─── 9. Tag the current commit ─────────────────────────────────────────────────
 
 console.log(`release: tagging ${tag}…`);
 execFileSync('git', ['tag', tag], { cwd: extensionDir, stdio: 'inherit' });
 execFileSync('git', ['push', 'origin', tag], { cwd: extensionDir, stdio: 'inherit' });
 
-// ─── 9. Publish GitHub Release ─────────────────────────────────────────────────
+// ─── 10. Publish GitHub Release ────────────────────────────────────────────────
 
 console.log('release: creating GitHub release…');
 const head = capture('git rev-parse HEAD');
@@ -129,6 +157,7 @@ execFileSync('gh', [
   'release', 'create', tag, vsixFile,
   '--title', tag,
   '--target', head,
+  '--notes', `Built with youproof-org/services ${servicesCommit} (${servicesBranch}).`,
   '--generate-notes',
 ], { cwd: extensionDir, stdio: 'inherit' });
 

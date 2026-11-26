@@ -70,9 +70,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -p ./ && esbuild media/src/sidebar/index.tsx --bundle --outfile=media/panel.js --platform=browser --format=iife --jsx=automatic --sourcemap && esbuild media/src/editor/index.tsx --bundle --outfile=media/editor.js --platform=browser --format=iife --jsx=automatic --sourcemap",
+    "typecheck": "node scripts/typecheck.js",
+    "build": "node scripts/typecheck.js && node scripts/build.js",
     "release": "node scripts/release.js",
-    "test": "tsc -p ./ && node --test \"test/*.test.mjs\""
+    "test": "node scripts/typecheck.js && node scripts/build.js --tests && node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "@codemirror/commands": "^6.0.0",
