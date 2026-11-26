@@ -618,6 +618,76 @@ test('an embed target is rewritten as the same fully qualified name, saving thro
   assert.deepEqual(embedTargets(saveAllThroughPanel(fixture())), authored)
 })
 
+const UNRESOLVED = [
+  'definitions.nincs-ilyen',
+  'theorems.proba-tetel.proofs.nincs-ilyen',
+  'theorems.proba-tetel.proofs.proba-bizonyitas.claims.proof-claim',
+]
+
+/** The fixture chapter with embeds the editor can't resolve, at the top level and nested in a subsection and a details block. */
+function unresolvedEmbedFixture() {
+  const root = fixture()
+  const file = path.join(root, CHAPTER_REL)
+  writeFileSync(file, `type: chapter
+name: fejezet
+slug: fejezet
+locale: hu
+title: Fejezet
+prologue:
+  - type: embed
+    target: ${UNRESOLVED[0]}
+  - type: subsection
+    title: Al
+    blocks:
+      - type: embed
+        target: ${UNRESOLVED[1]}
+  - type: details
+    title: Részletek
+    blocks:
+      - type: embed
+        target: ${UNRESOLVED[2]}
+sections: []
+`)
+  return root
+}
+
+const allEmbedTargets = (blocks) =>
+  (blocks ?? []).flatMap((b) => (b.type === 'embed' ? [b.target] : allEmbedTargets(b.blocks)))
+
+test('an embed target the editor cannot resolve is saved as authored, through the panel too', () => {
+  for (const save of [saveAll, saveAllThroughPanel]) {
+    const saved = chapterDoc(save(unresolvedEmbedFixture()))
+    assert.deepEqual(allEmbedTargets(saved.prologue), UNRESOLVED, save.name)
+  }
+})
+
+test('an unresolved embed target survives a second save through the panel', () => {
+  const root = unresolvedEmbedFixture()
+  const content = loadContent(root, 'hu')
+  const chapter = [...content.idToObject.values()].find((o) => o.type === 'chapter')
+  for (let i = 0; i < 2; i++) {
+    chapter.prologue = updateModelBlocks(serializeBlocks(chapter.prologue), chapter, content.idToObject)
+    saveFromModel(chapter.id, content)
+  }
+  assert.deepEqual(allEmbedTargets(doc(readFileSync(path.join(root, CHAPTER_REL), 'utf8')).prologue), UNRESOLVED)
+})
+
+test('an embed target picked or cleared in the panel replaces the authored one', () => {
+  const root = unresolvedEmbedFixture()
+  const content = loadContent(root, 'hu')
+  const chapter = [...content.idToObject.values()].find((o) => o.type === 'chapter')
+  const definition = [...content.idToObject.values()].find((o) => o.type === 'definition' && o.name === 'proba-definicio')
+  const wire = serializeBlocks(chapter.prologue)
+  Object.assign(wire[0], { targetType: 'definition', targetId: definition.id })
+  Object.assign(wire[1].blocks[0], { targetType: '', targetId: '' })
+  chapter.prologue = updateModelBlocks(wire, chapter, content.idToObject)
+  saveFromModel(chapter.id, content)
+  const saved = doc(readFileSync(path.join(root, CHAPTER_REL), 'utf8')).prologue
+  assert.equal(saved[0].target, 'definitions.proba-definicio', 'a picked target is written as its own path')
+  assert.equal(saved[1].blocks[0].target, undefined, 'a cleared target is removed')
+  assert.equal(saved[2].blocks[0].target, UNRESOLVED[2], 'an untouched one is kept')
+})
+
 test('a file with an unmigrated embed target refuses to save, rather than dropping it', () => {
   const root = fixture()
   const file = path.join(root, CHAPTER_REL)

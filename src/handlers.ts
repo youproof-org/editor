@@ -943,6 +943,17 @@ export function updateModelTerms(obj: WireBlock, incoming: ContentTerm[], idToOb
   }
 }
 
+// The wire carries only a target's type and ID, so the path the loader kept is
+// carried over while the target is unchanged. Without it, a target the editor can't
+// resolve, which has no ID, is written back as no target at all.
+type WireTarget = { type: string; target: string; fqn?: string };
+
+function carryAuthoredPath(previous: WireTarget | undefined, next: WireTarget): WireTarget {
+  return previous?.fqn && previous.type === next.type && previous.target === next.target
+    ? { ...next, fqn: previous.fqn }
+    : next;
+}
+
 function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock): void {
   model['id']        = wire['id'];
   model['blockType'] = wire['blockType'];
@@ -951,7 +962,10 @@ function applyWireToBlock(model: WireBlock, wire: WireBlock, parent: WireBlock):
   const bt = wire['blockType'] as string;
   if (bt === 'embed') {
     if ('targetType' in wire || 'targetId' in wire) {
-      model['target'] = { type: String(wire['targetType'] ?? ''), target: String(wire['targetId'] ?? '') };
+      model['target'] = carryAuthoredPath(
+        model['target'] as WireTarget | undefined,
+        { type: String(wire['targetType'] ?? ''), target: String(wire['targetId'] ?? '') },
+      );
     }
     if ('showTitle' in wire) model['showTitle'] = wire['showTitle'];
     else delete model['showTitle'];
