@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import yaml from 'js-yaml';
 import type {
-  LoadedContent,
+  LoadedContent, LoadProblem, NumberingScope,
   Book, Part, Chapter, Section,
   Namespace, Definition, Theorem, Proof, Remark,
   Term, RefTarget, RefTargetType, RefParent, FileReferences, ReferenceEntry,
@@ -10,7 +10,7 @@ import type {
   SubsectionBlock, DetailsBlock, EmbedBlock,
   EntityLabelFields,
 } from './model';
-import { isExternalTarget, parseFqn, type FqnStep, type RefTargetKind } from '@youproof.org/content-model';
+import { fqnJoin, isExternalTarget, parseFqn, type FqnStep, type RefTargetKind } from '@youproof.org/content-model';
 import { fileReferenceTexts, readReferences, referenceTokens, type ReferenceFileKind } from '@youproof.org/display-templates';
 import { normalizeStrings } from './normalize';
 import { collectBlockText } from '../protocol/blockText';
@@ -61,6 +61,9 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
   const filePathToId = new Map<string, string>();
   const idToObject   = new Map<string, unknown>();
   const refPathToId  = new Map<string, string>(); // temporary; discarded after Pass 2
+  const problems: LoadProblem[] = [];
+  const problem = (message: string, scope?: NumberingScope): void => { problems.push({ message, ...(scope ? { scope } : {}) }); };
+  const failure = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
   type PendingEntry = { set: (r: RefTarget) => void; raw: unknown };
   const pending: PendingEntry[] = [];
@@ -289,6 +292,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
   function loadBook(booksDir: string, bookName: string): Book | null {
     const bookDir  = path.join(booksDir, bookName);
     const bookYaml = path.join(bookDir, 'book.yaml');
+    const bookFqn  = fqnJoin('', 'book', bookName);
     try {
       const data = readYaml(bookYaml);
       if (localeOf(data) !== locale) return null; // book (and its subtree) belongs to another locale
@@ -300,15 +304,26 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       };
       registerFile(id, bookYaml); reg(id, book); regRef(bookKey(bookName), id);
       book.parts = strArr(data, 'parts')
-        .map(p => loadPart(bookDir, p, bookName, book))
+        .map(p => loadPart(bookDir, p, bookName, book, bookFqn))
         .filter((p): p is Part => p !== null);
       return book;
-    } catch { return null; }
+    } catch (err) {
+      problem(`book '${bookName}' in episodes.yaml could not be loaded from ${bookYaml}: ${failure(err)}`, { kind: 'all' });
+      return null;
+    }
   }
 
-  function loadPart(bookDir: string, partName: string, bookName: string, book: Book): Part | null {
-    const partDir  = findChildDir(bookDir, partName, 'part.yaml');
-    if (!partDir) return null;
+  function loadPart(bookDir: string, partName: string, bookName: string, book: Book, bookFqn: string): Part | null {
+    const bookScope: NumberingScope = { kind: 'book', fqn: bookFqn };
+    let partDir: string | null;
+    try { partDir = findChildDir(bookDir, partName, 'part.yaml'); } catch (err) {
+      problem(`part '${partName}' of book '${bookName}' could not be found: ${failure(err)}`, bookScope);
+      return null;
+    }
+    if (!partDir) {
+      problem(`${path.join(bookDir, 'book.yaml')} lists part '${partName}', but no part.yaml under ${bookDir} has that name`, bookScope);
+      return null;
+    }
     const partYaml = path.join(partDir, 'part.yaml');
     try {
       const data = readYaml(partYaml);
@@ -320,18 +335,31 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       };
       registerFile(id, partYaml); reg(id, part); regRef(partKey(bookName, partName), id);
       part.chapters = strArr(data, 'chapters')
-        .map(c => loadChapter(partDir, c, partName, bookName, part))
+        .map(c => loadChapter(partYaml, c, partName, bookName, part, bookFqn))
         .filter((c): c is Chapter => c !== null);
       return part;
-    } catch { return null; }
+    } catch (err) {
+      problem(`part '${partName}' could not be loaded from ${partYaml}: ${failure(err)}`, bookScope);
+      return null;
+    }
   }
 
   function loadChapter(
-    partDir: string, chapterName: string, partName: string, bookName: string, part: Part,
+    partYaml: string, chapterName: string, partName: string, bookName: string, part: Part, bookFqn: string,
   ): Chapter | null {
-    const chapterDir  = findChildDir(partDir, chapterName, 'chapter.yaml');
-    if (!chapterDir) return null;
+    const partDir = path.dirname(partYaml);
+    const bookScope: NumberingScope = { kind: 'book', fqn: bookFqn };
+    let chapterDir: string | null;
+    try { chapterDir = findChildDir(partDir, chapterName, 'chapter.yaml'); } catch (err) {
+      problem(`chapter '${chapterName}' listed in ${partYaml} could not be found: ${failure(err)}`, bookScope);
+      return null;
+    }
+    if (!chapterDir) {
+      problem(`${partYaml} lists chapter '${chapterName}', but no chapter.yaml under ${partDir} has that name`, bookScope);
+      return null;
+    }
     const chapterYaml = path.join(chapterDir, 'chapter.yaml');
+    const chapterScope: NumberingScope = { kind: 'chapter', fqn: fqnJoin(bookFqn, 'chapter', chapterName) };
     try {
       const data = readYaml(chapterYaml);
       const id   = genId();
@@ -349,18 +377,29 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       chapter.prologue            = loadBlocks(data['prologue'], chapter);
       chapter.epilogue            = loadBlocks(data['epilogue'], chapter);
       chapter.sections = strArr(data, 'sections')
-        .map(s => loadSection(chapterDir, s, chapterName, partName, bookName, chapter))
+        .map(s => loadSection(chapterYaml, s, chapterName, partName, bookName, chapter, chapterScope))
         .filter((s): s is Section => s !== null);
       return chapter;
-    } catch { return null; }
+    } catch (err) {
+      problem(`chapter '${chapterName}' could not be loaded from ${chapterYaml}: ${failure(err)}`, bookScope);
+      return null;
+    }
   }
 
   function loadSection(
-    chapterDir: string, sectionName: string,
-    chapterName: string, partName: string, bookName: string, chapter: Chapter,
+    chapterYaml: string, sectionName: string,
+    chapterName: string, partName: string, bookName: string, chapter: Chapter, chapterScope: NumberingScope,
   ): Section | null {
-    const sectionFile = findChildFile(chapterDir, sectionName);
-    if (!sectionFile) return null;
+    const chapterDir = path.dirname(chapterYaml);
+    let sectionFile: string | null;
+    try { sectionFile = findChildFile(chapterDir, sectionName); } catch (err) {
+      problem(`section '${sectionName}' listed in ${chapterYaml} could not be found: ${failure(err)}`, chapterScope);
+      return null;
+    }
+    if (!sectionFile) {
+      problem(`${chapterYaml} lists section '${sectionName}', but no section file in ${chapterDir} has that name`, chapterScope);
+      return null;
+    }
     try {
       const data = readYaml(sectionFile);
       const id   = genId();
@@ -373,7 +412,10 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       section.references = loadReferences(sectionFile, 'section', section);
       section.body       = loadBlocks(data['body'], section);
       return section;
-    } catch { return null; }
+    } catch (err) {
+      problem(`section '${sectionName}' could not be loaded from ${sectionFile}: ${failure(err)}`, chapterScope);
+      return null;
+    }
   }
 
   // ─── Knowledge base ───────────────────────────────────────────────────────────
@@ -537,7 +579,10 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
       const remText  = collectBlockText(rem.body);
       rem.terms      = sortTermsByFirstOccurrence(rem.terms, remText);
       return rem;
-    } catch { return null; }
+    } catch (err) {
+      problem(`${filePath} could not be loaded: ${failure(err)}`);
+      return null;
+    }
   }
 
   // ─── Pass 1 execution ─────────────────────────────────────────────────────────
@@ -551,15 +596,24 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
     const remarkByName = new Map(lists.remarks.map(r => [r.name, r]));
     const proofByName  = new Map(lists.proofs.map(p => [p.name, p]));
 
+    // An owner can only list a proof or remark of its own namespace here, where the
+    // site looks across the knowledge base, so a name that isn't found is reported:
+    // the site would attach it, or fail the build.
+    const owned = <T extends { name: string }>(owner: Definition | Theorem | Proof, listed: string[], byName: Map<string, T>, container: string): T[] =>
+      listed.flatMap(name => {
+        const found = byName.get(name);
+        if (!found) problem(`${owner.filePath} lists '${name}' in ${container}, but its namespace has no ${container === 'proofs' ? 'proof' : 'remark'} of that name`);
+        return found ? [found] : [];
+      });
     for (const def of lists.defs) {
-      def.remarks = (remarkNames.get(def.id) ?? []).map(n => remarkByName.get(n)).filter((r): r is Remark => !!r);
+      def.remarks = owned(def, remarkNames.get(def.id) ?? [], remarkByName, 'remarks');
     }
     for (const thm of lists.thms) {
-      thm.proofs  = (proofNames.get(thm.id)  ?? []).map(n => proofByName.get(n)).filter((p): p is Proof => !!p);
-      thm.remarks = (remarkNames.get(thm.id) ?? []).map(n => remarkByName.get(n)).filter((r): r is Remark => !!r);
+      thm.proofs  = owned(thm, proofNames.get(thm.id)  ?? [], proofByName, 'proofs');
+      thm.remarks = owned(thm, remarkNames.get(thm.id) ?? [], remarkByName, 'remarks');
     }
     for (const proof of lists.proofs) {
-      proof.remarks = (remarkNames.get(proof.id) ?? []).map(n => remarkByName.get(n)).filter((r): r is Remark => !!r);
+      proof.remarks = owned(proof, remarkNames.get(proof.id) ?? [], remarkByName, 'remarks');
     }
   }
 
@@ -577,7 +631,7 @@ export function loadContent(contentRoot: string, locale: string, siteDefaultLoca
     set(resolveTarget(raw, { books, defsByName, thmsByName }));
   }
 
-  return { books, kb, idToFilePath, filePathToId, idToObject };
+  return { books, kb, idToFilePath, filePathToId, idToObject, problems };
 }
 
 // ─── Reference target resolution (Pass 2) ────────────────────────────────────

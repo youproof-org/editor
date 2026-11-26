@@ -9,6 +9,7 @@ import { readServicesData, ServicesDataError, type ServicesData } from './conten
 import {
   describeDisplayTemplateErrors, DISPLAY_TEMPLATES_DIR, displayTemplatesFile, readDisplayTemplates, type DisplayTemplates,
 } from './content/displayTemplates';
+import { describeNumberingProblems, numberContent } from './content/numbering';
 import type { LoadedContent } from './content/model';
 import { registerHandlers, resolveContentRoot, resolveServicesRootSetting } from './handlers';
 
@@ -23,6 +24,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // first configured locale) on startup, switched by the per-locale reload buttons (see the reloadModel handler).
   let activeLocale: string | null = null;
   let displayTemplates: DisplayTemplates | null = null;
+  let reportedNumberingProblems: string | undefined;
 
   function reloadServices(): ServicesData {
     services = null;
@@ -66,8 +68,17 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!contentCache) {
       const { localeConfig } = getServices();
       contentCache = loadContent(resolveContentRoot(context), activeLocale ?? localeConfig.defaultLocale, localeConfig.locales[0]);
+      reportNumberingProblems(contentCache);
     }
     return contentCache;
+  }
+
+  // Shown when the problems change, so a save that leaves them as they were
+  // doesn't show them again; a reload always does.
+  function reportNumberingProblems(content: LoadedContent): void {
+    const problem = describeNumberingProblems(numberContent(content).problems);
+    if (problem && problem !== reportedNumberingProblems) vscode.window.showErrorMessage(problem);
+    reportedNumberingProblems = problem;
   }
 
   const contentRootSet = !!vscode.workspace.getConfiguration('youproof').get<string>('contentRoot')?.trim();
@@ -115,7 +126,11 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     getSelectedId:     () => selectedId,
     setSelectedId:     (id) => { selectedId = id; },
-    resetContentCache: () => { contentCache = null; },
+    resetContentCache: () => {
+      contentCache = null;
+      reportedNumberingProblems = undefined;
+    },
+    contentChanged:    () => { if (contentCache) reportNumberingProblems(contentCache); },
     getActiveLocale:   () => activeLocale ?? getServices().localeConfig.defaultLocale,
     setActiveLocale:   (l) => {
       activeLocale = l;

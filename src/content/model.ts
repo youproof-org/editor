@@ -255,4 +255,22 @@ export interface LoadedContent {
   filePathToId: Map<string, string>;
   /** Maps all object IDs (including inline objects) to their objects. */
   idToObject: Map<string, unknown>;
+  /** Content the files name that the loader could not load. */
+  problems: LoadProblem[];
+}
+
+/**
+ * Where a load problem can make the editor's numbers differ from the site's: a
+ * missing section renumbers its chapter, a missing part or chapter its book, and
+ * a missing book can move where any entity is first embedded.
+ */
+export type NumberingScope =
+  | { kind: 'all' }
+  | { kind: 'book'; fqn: string }
+  | { kind: 'chapter'; fqn: string };
+
+export interface LoadProblem {
+  message: string;
+  /** Absent when the problem changes no number, only what the editor can look up. */
+  scope?: NumberingScope;
 }

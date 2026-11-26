@@ -47,6 +47,8 @@ export interface HandlerContext {
   getSelectedId:     () => string | null;
   setSelectedId:     (id: string | null) => void;
   resetContentCache: () => void;
+  /** The model was edited in place, as a save does. */
+  contentChanged:    () => void;
   getActiveLocale:   () => string;
   setActiveLocale:   (locale: string) => void;
 }
@@ -55,7 +57,7 @@ export interface HandlerContext {
 
 export function registerHandlers(ctx: HandlerContext): void {
   const { server, panelManager, getContent, getServices, reloadServices, getSelectedId, setSelectedId,
-          resetContentCache, getActiveLocale, setActiveLocale } = ctx;
+          resetContentCache, contentChanged, getActiveLocale, setActiveLocale } = ctx;
   let pendingTargetSelection: { selectorId: string; allowedTypes: string[] } | null = null;
 
   server.onRequest('getContentTree', async (): Promise<GetContentTreeResponse> => {
@@ -192,6 +194,7 @@ export function registerHandlers(ctx: HandlerContext): void {
 
     saveFromModel(p.id, content);
     panelManager.setDirty(p.id, false);
+    contentChanged();
 
     if (oldSelectedId && !content.idToObject.has(oldSelectedId)) {
       setSelectedId(oldSelectedParentId ?? p.id);
