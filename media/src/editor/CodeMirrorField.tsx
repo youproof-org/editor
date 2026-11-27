@@ -99,7 +99,6 @@ const vsCodeTheme = EditorView.theme({
   '.cm-yp-formula': { color: '#dcdcaa' },
   '.cm-yp-term':    { color: '#c8a832' },
   '.cm-yp-ref':     { color: '#9b72d0' },
-  '.cm-yp-ref-link': { textDecoration: 'underline', textUnderlineOffset: '2px' },
   '.cm-yp-ref-pending': { opacity: '0.6' },
   '.cm-yp-ref-error': {
     color: 'var(--vscode-errorForeground, #f48771)',

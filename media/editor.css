@@ -754,7 +754,7 @@ details > summary:hover { opacity: 0.8; }
 .ref-popup-rendered { color: #9b72d0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ref-popup-rendered--pending { opacity: 0.6; }
 .ref-popup-rendered--error { color: var(--vscode-errorForeground, #f48771); white-space: normal; }
-.ref-popup-link { text-decoration: underline; text-underline-offset: 2px; color: #9b72d0; }
+.ref-popup-link { color: #9b72d0; }
 
 .ref-popup-modes { display: flex; align-items: center; gap: 4px; padding: 4px 6px 0; }
 .ref-popup-mode {
