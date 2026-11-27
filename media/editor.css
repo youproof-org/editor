@@ -819,3 +819,19 @@ details > summary:hover { opacity: 0.8; }
   font: inherit;
 }
 .ref-popup-link-btn:hover { text-decoration: underline; }
+
+.yp-tip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 420px;
+  padding: 3px 7px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  border-radius: 3px;
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}

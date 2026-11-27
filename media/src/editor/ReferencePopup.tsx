@@ -34,11 +34,11 @@ type Shown = { state: 'pending' } | { state: 'error'; reason: string } | { state
 
 function Rendered({ shown, fallback }: { shown: Shown; fallback?: string }) {
   if (shown.state === 'pending') return <span className="ref-popup-rendered ref-popup-rendered--pending">{fallback ?? '…'}</span>;
-  if (shown.state === 'error') return <span className="ref-popup-rendered ref-popup-rendered--error" title={shown.reason}>{shown.reason}</span>;
+  if (shown.state === 'error') return <span className="ref-popup-rendered ref-popup-rendered--error" data-tip={shown.reason}>{shown.reason}</span>;
   return (
     <span className="ref-popup-rendered">
       {shown.segments.map((segment, i) => (segment.kind === 'link'
-        ? <span key={i} className="ref-popup-link" title={segment.target}>[{segment.text}]</span>
+        ? <span key={i} className="ref-popup-link" data-tip={segment.target}>[{segment.text}]</span>
         : <span key={i}>{segment.text}</span>))}
     </span>
   );
@@ -60,7 +60,7 @@ function TargetLine({ target, choice }: { target: DraftTarget; choice: Reference
       <span className="ref-popup-target-label">{choice.kind === 'claim' && choice.owner ? `${choice.owner} ${choice.label}` : choice.label}</span>
       {choice.title && <span className="ref-popup-dim">{choice.title}</span>}
       {choice.kind !== 'claim' && choice.owner && <span className="ref-popup-dim">· {choice.owner}</span>}
-      {choice.problem && <span className="ref-popup-warning" title={choice.problem}>!</span>}
+      {choice.problem && <span className="ref-popup-warning" data-tip={choice.problem}>!</span>}
     </span>
   );
 }
@@ -403,7 +403,7 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
               return (
                 <div key={target.path} className="ref-popup-row ref-popup-row--static">
                   <TargetLine target={target} choice={choice} />
-                  {stale && <span className="ref-popup-warning" title={`'${target.path}' is not in the content the editor loaded.`}>not found</span>}
+                  {stale && <span className="ref-popup-warning" data-tip={`'${target.path}' is not in the content the editor loaded.`}>not found</span>}
                   {stale && <button className="ref-popup-btn" onClick={() => setAdding({ replace: target.path })}>Re-pick</button>}
                   {reorder && <>
                     <button className="ref-popup-icon-btn" title="Move up" onClick={() => moveTarget(target.path, -1)}>↑</button>

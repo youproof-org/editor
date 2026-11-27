@@ -67,7 +67,7 @@ class ReferenceWidget extends WidgetType {
   toDOM(editor: EditorView): HTMLElement {
     const span = document.createElement('span');
     span.className = `cm-yp-ref cm-yp-ref-${this.view.state}${this.role === 'token' ? '' : ` cm-yp-ref-${this.role}`}`;
-    if (this.view.reason) span.title = this.view.reason;
+    if (this.view.reason) span.dataset.tip = this.view.reason;
     if (this.role !== 'ghost') {
       span.addEventListener('mousedown', (event) => {
         const open = editor.state.facet(referenceTokenClick);
@@ -89,7 +89,7 @@ class ReferenceWidget extends WidgetType {
       } else {
         const link = document.createElement('span');
         link.className = 'cm-yp-ref-link';
-        link.title = part.target;
+        link.dataset.tip = part.target;
         link.textContent = `[${part.text}]`;
         span.append(link);
       }

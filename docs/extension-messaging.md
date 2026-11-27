@@ -197,7 +197,7 @@ The host renders each token as the site renders its reference in a file of the o
 
 When the entity label registry couldn't be read, every display is that error. The segments are not capitalized: the webview capitalizes a reference where the site starts a sentence with it, which depends on the text around the token (`src/protocol/referencePlacement.ts`).
 
-The webview shows a rendered token in purple, each link segment in brackets, with the link's target on hover. A token shows its template name or literal text dimmed while its display is on its way, and in an error state, with the reason on hover, when the host returns an error, when the token sits where the site reads no reference (inside `$...$` or `^...^`, or in a field such as a formula's `content`), or when its payload can't be decoded. None of this changes what a save refuses.
+The webview shows a rendered token in purple, each link segment in brackets, with the link's target in a tooltip once the pointer rests on it for 120 ms (`hoverTip.ts`, which shows any element's `data-tip`; a native `title` takes the browser's own, much longer, delay). A token shows its template name or literal text dimmed while its display is on its way, and in an error state, with the reason in the same tooltip, when the host returns an error, when the token sits where the site reads no reference (inside `$...$` or `^...^`, or in a field such as a formula's `content`), or when its payload can't be decoded. None of this changes what a save refuses.
 
 ---
 
