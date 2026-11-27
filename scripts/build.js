@@ -4,7 +4,8 @@
  * Bundles the extension host and the two webviews with esbuild, resolving the
  * shared @youproof.org packages from the services checkout (see services-dir.js).
  *
- *   node scripts/build.js            out/extension.js, media/panel.js, media/editor.js
+ *   node scripts/build.js            out/extension.js, media/panel.js, media/editor.js, and out/content-writer.js,
+ *                                    the save's YAML writer that the content repo's scripts/rewrap-content.mjs loads
  *   node scripts/build.js --tests    the same, plus out/test/host.js and out/test/webview.js for test/*.test.mjs
  *
  * Type checking is separate (scripts/typecheck.js); esbuild only strips types.
@@ -53,6 +54,7 @@ const webview = {
 
 const builds = [
   { ...host, entryPoints: [at('src/extension.ts')], outfile: at('out/extension.js') },
+  { ...host, entryPoints: [at('src/content/writer.ts')], outfile: at('out/content-writer.js') },
   { ...webview, entryPoints: [at('media/src/sidebar/index.tsx')], outfile: at('media/panel.js') },
   { ...webview, entryPoints: [at('media/src/editor/index.tsx')], outfile: at('media/editor.js') },
 ];

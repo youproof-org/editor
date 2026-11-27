@@ -11,7 +11,7 @@ import {
   type EntityLabelRegistry, type FqnStep, type RefTargetKind,
 } from '@youproof.org/content-model';
 import { fileReferenceTexts, readReferences, type DisplayTemplateCollection } from '@youproof.org/display-templates';
-import { normalizeStrings } from './content/normalize';
+import { contentFileText } from './content/writer';
 import {
   describeSavedReferenceProblems, numberReferences, referenceFileKind, referencesSectionFor,
 } from './content/references';
@@ -739,20 +739,13 @@ export function saveFromModel(id: string, content: LoadedContent, templates?: Di
   const section = references && isDeepStrictEqual(items, references.saved)
     ? references.source
     : items.length > 0 ? referencesSectionFor(items) : null;
-  if (section) yamlDoc['references'] = REFERENCES_PLACEHOLDER;
-  else delete yamlDoc['references'];
 
   if (KB_ENTITY_TYPES.includes(type)) {
     if (typeof obj['label'] === 'string' && obj['label']) yamlDoc['label'] = obj['label'];
     else delete yamlDoc['label'];
   }
 
-  const reordered = reorderYamlKeys(yamlDoc, type);
-  const dumped = yaml.dump(
-    normalizeStrings(reordered) as Record<string, unknown>,
-    { lineWidth: 120, noCompatMode: true },
-  );
-  const rewritten = section ? withReferencesSection(dumped, section) : dumped;
+  const rewritten = contentFileText(yamlDoc, type, section);
   // The dump folds long strings at 120 columns, which would rewrap a file folded otherwise.
   const unchanged = isDeepStrictEqual(yaml.load(rewritten, { schema: yaml.CORE_SCHEMA }), yaml.load(onDisk, { schema: yaml.CORE_SCHEMA }));
   const written = unchanged ? onDisk : rewritten;
@@ -766,59 +759,6 @@ export function saveFromModel(id: string, content: LoadedContent, templates?: Di
   const locale = typeof obj['locale'] === 'string' ? obj['locale'] as string : '';
   return readReferences(doc['references'], { locale, templates: { [locale]: templates }, texts: fileReferenceTexts(doc, kind) }).errors;
 }
-
-// js-yaml would rewrite the list's one-item-per-line flow style, so the section is
-// put in after the dump, in place of a placeholder that keeps the key's position.
-const REFERENCES_PLACEHOLDER = 'yp-editor-references';
-
-function withReferencesSection(dumped: string, section: string): string {
-  const lines = dumped.split('\n');
-  const placeholder = `references: ${REFERENCES_PLACEHOLDER}`;
-  const at = lines.indexOf(placeholder);
-  if (at === -1 || lines.indexOf(placeholder, at + 1) !== -1) {
-    throw new Error('The references list could not be put in its place in the file, so nothing was saved.');
-  }
-  lines.splice(at, 1, section.replace(/\n$/, ''));
-  return lines.join('\n');
-}
-
-// Key order per type — keeps saved YAML stable instead of appending keys. The
-// localization fields (`slug`, `locale`), the chapter migration/listing fields
-// (`excerpt`, `published-at`, `legacy-path`) and the crawler-metadata block
-// (`meta`) are included so they stay in place on save (read from / written back
-// verbatim, not modelled). `slug` follows `name` and `locale` follows `slug`, on
-// every type that carries one — a proof and a remark carry none, since each is
-// addressed by its position in the list of the node that owns it rather than by
-// an identifier of its own. Keys not listed are still preserved —
-// appended after these — but list everything the content emits so nothing moves.
-// Types with NO entry here (book, article, newsletter, page, landing) are left
-// untouched by reorderYamlKeys, so their `meta`/`excerpt` keep their authored
-// position; add an entry when the editor gains a UI for those types.
-const CANONICAL_ORDER: Record<string, string[]> = {
-  definition: ['type', 'name', 'slug', 'locale', 'title', 'label', 'remarks', 'terms', 'references', 'body'],
-  theorem:    ['type', 'name', 'slug', 'locale', 'title', 'label', 'proofs', 'remarks', 'terms', 'references', 'body'],
-  proof:      ['type', 'name', 'locale', 'title', 'label', 'remarks', 'terms', 'references', 'body'],
-  remark:     ['type', 'name', 'locale', 'title', 'label', 'terms', 'references', 'body'],
-  section:    ['type', 'name', 'slug', 'locale', 'title', 'references', 'body'],
-  part:       ['type', 'name', 'slug', 'locale', 'title', 'chapters'],
-  chapter:    ['type', 'name', 'slug', 'locale', 'title', 'excerpt', 'published-at', 'legacy-path',
-               'meta', 'thumbnail', 'references',
-               'abstract', 'prerequisite-warning', 'prologue', 'sections', 'epilogue'],
-};
-
-function reorderYamlKeys(yamlDoc: Record<string, unknown>, type: string): Record<string, unknown> {
-  const order = CANONICAL_ORDER[type];
-  if (!order) return yamlDoc;
-  const result: Record<string, unknown> = {};
-  for (const key of order) {
-    if (key in yamlDoc) result[key] = yamlDoc[key];
-  }
-  for (const key of Object.keys(yamlDoc)) {
-    if (!(key in result)) result[key] = yamlDoc[key];
-  }
-  return result;
-}
-
 
 function blockHeader(wire: WireBlock, type: string): WireBlock {
   const r: WireBlock = { type };
@@ -937,7 +877,7 @@ function blockToYaml(
       const r = blockHeader(wire, 'claim');
       r['name']    = wire['name'];
       // `slug` sits right after `name`, matching where it sits on the addressable
-      // types (chapter/section) and in CANONICAL_ORDER below.
+      // types (chapter/section) and in CANONICAL_ORDER in content/writer.ts.
       // The only identifier this editor lets an author type: a new claim block is
       // created with an empty name. It becomes a segment of a dotted path — a
       // reference to it is `...claims.{name}` — so a `.` or a space would make that

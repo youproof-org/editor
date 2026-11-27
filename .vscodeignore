@@ -21,3 +21,6 @@ tsconfig.json
 # Test-only bundle and generated type-check config
 out/test/**
 out/typecheck/**
+
+# The YAML writer bundle for the content repo's rewrap script
+out/content-writer.*
