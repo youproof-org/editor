@@ -473,6 +473,23 @@ const CHAPTER_REL = path.join('books', 'konyv', 'resz', 'fejezet', 'chapter.yaml
 const chapterDoc = (files) => doc(files[CHAPTER_REL])
 const chapterOf = (content) => [...content.idToObject.values()].find((o) => o.type === 'chapter')
 
+test('a save that changes no data keeps the file byte for byte, folded as it is', () => {
+  const root = fixture()
+  const file = path.join(root, CHAPTER_REL)
+  const before = readFileSync(file, 'utf8')
+  assert.match(before, /\[4\],\n      \[5\]/, 'the fixture folds the prologue short of 120 columns')
+  for (const save of [saveAll, saveAllThroughPanel]) assert.equal(save(root)[CHAPTER_REL], before, save.name)
+})
+
+test('a save that changes the data rewrites the file, folded at 120 columns', () => {
+  const root = fixture()
+  const { content, id, obj } = nodeFor(root, CHAPTER_REL)
+  obj.prologue[0].content = obj.prologue[0].content.replace('Lásd', 'Lásd még')
+  saveFromModel(id, content)
+  const after = readFileSync(path.join(root, CHAPTER_REL), 'utf8')
+  assert.match(after, /content: Lásd még \[0\], \[1\], \[2\], \[3\], \[4\], \[5\], \[6\], \[7\], \[8\]\.\n/)
+})
+
 test('the references section is the key and its lines, up to the next top-level key', () => {
   const list = "references:\n  - { text: '[a]', target: definitions.a }\n  - { text: '[b]', target: definitions.b }\n"
   assert.equal(referencesSection(`type: section\n${list}body: []\n`), list)

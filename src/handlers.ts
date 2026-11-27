@@ -637,7 +637,8 @@ export function entityLabelFields(obj: Record<string, unknown>, services: Servic
  * Write a content object's file from the model, merged into the YAML on disk so that
  * keys the model doesn't hold survive. The references its text holds are
  * written as the `references` list, numbered in the order the site reads them, and
- * an unchanged list is written back exactly as the file had it. Returns what the site
+ * an unchanged list is written back exactly as the file had it. A file the save
+ * leaves with the same data is not rewritten. Returns what the site
  * build's reader reports about the references as written, checked against
  * `templates`; without them, nothing is checked.
  */
@@ -653,7 +654,8 @@ export function saveFromModel(id: string, content: LoadedContent, templates?: Di
   // default schema js-yaml parses them into Date objects, which normalizeStrings
   // then flattens to `{}` (a Date has no enumerable own keys) — corrupting the
   // field on save.
-  const yamlDoc = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
+  const onDisk = fs.readFileSync(filePath, 'utf8');
+  const yamlDoc = yaml.load(onDisk, { schema: yaml.CORE_SCHEMA }) as Record<string, unknown>;
 
   // Claim and term slugs are modelled fields now (YP-173), so nothing has to be
   // rescued off the file first. What does have to happen first is the check: a
@@ -739,8 +741,11 @@ export function saveFromModel(id: string, content: LoadedContent, templates?: Di
     normalizeStrings(reordered) as Record<string, unknown>,
     { lineWidth: 120, noCompatMode: true },
   );
-  const written = section ? withReferencesSection(dumped, section) : dumped;
-  fs.writeFileSync(filePath, written);
+  const rewritten = section ? withReferencesSection(dumped, section) : dumped;
+  // The dump folds long strings at 120 columns, which would rewrap a file folded otherwise.
+  const unchanged = isDeepStrictEqual(yaml.load(rewritten, { schema: yaml.CORE_SCHEMA }), yaml.load(onDisk, { schema: yaml.CORE_SCHEMA }));
+  const written = unchanged ? onDisk : rewritten;
+  if (!unchanged) fs.writeFileSync(filePath, written);
   if (references) {
     references.saved = items;
     references.source = section;

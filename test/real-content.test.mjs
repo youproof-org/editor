@@ -48,7 +48,7 @@ function templatesOf(root) {
   return templates.collection
 }
 
-test('saving every real content file keeps its references list and its tokens byte for byte', { skip }, (t) => {
+test('saving every real content file unedited keeps it byte for byte, its references list and tokens included', { skip }, (t) => {
   const root = mkdtempSync(path.join(tmpdir(), 'yp-real-content-'))
   cpSync(path.resolve(contentDir), root, { recursive: true })
   const templates = templatesOf(root)
@@ -77,6 +77,7 @@ test('saving every real content file keeps its references list and its tokens by
   }
   t.diagnostic(`${files} files saved, ${withList} with a references list, ${identical} identical byte for byte`)
   assert.deepEqual(problems, [])
+  assert.equal(identical, files, 'a save that changes nothing keeps every file byte for byte')
   assert.ok(withList > 0, 'the checkout has references lists')
 })
 
