@@ -39,6 +39,7 @@ const {
   referencesSection,
   heldReferences, heldReferenceItems, findReferenceTokens,
 } = await import('../out/test/host.js')
+const { rewrapContentFile } = await import('../out/content-writer.js')
 
 const NS = 'namespace.yaml'
 
@@ -488,6 +489,75 @@ test('a save that changes the data rewrites the file, folded at 120 columns', ()
   saveFromModel(id, content)
   const after = readFileSync(path.join(root, CHAPTER_REL), 'utf8')
   assert.match(after, /content: Lásd még \[0\], \[1\], \[2\], \[3\], \[4\], \[5\], \[6\], \[7\], \[8\]\.\n/)
+})
+
+// A multi-line string with one line past the dump's width is folded by js-yaml, and a
+// folded block needs a blank line between the formula's lines to keep them apart.
+const LONG_LINE = Array.from({ length: 14 }, (_, i) => `a_{${i}} + b_{${i}}`).join(' + ') + ' = c'
+const FORMULA_THEOREM = `type: theorem
+name: proba-tetel
+slug: proba-tetel
+locale: hu
+title: Próba tétel
+label: lemma
+proofs:
+  - proba-bizonyitas
+remarks: []
+references: []
+body:
+  - type: formula
+    content: |-
+      x = y \\\\
+      ${LONG_LINE}
+  - type: claim
+    name: formula-claim
+    slug: formula-allitas
+    content: Állítás.
+    formula: |-
+      u = v \\\\
+      ${LONG_LINE}
+  - type: subsection
+    title: Alszakasz
+    blocks:
+      - type: formula
+        content: |-
+          p = q \\\\
+          ${LONG_LINE}
+`
+const THEOREM_REL = path.join('knowledge-base', 'proba', 'theorems', 'proba-tetel.yaml')
+
+function formulaFixture() {
+  const root = fixture()
+  writeFileSync(path.join(root, THEOREM_REL), FORMULA_THEOREM)
+  return root
+}
+
+test('editing a multi-line formula keeps it a literal block, its long line whole', () => {
+  assert.ok(LONG_LINE.length > 120)
+  const root = formulaFixture()
+  const { content, id, obj } = nodeFor(root, THEOREM_REL)
+  const [formula, claim, subsection] = obj.body
+  formula.content = formula.content.replace('x = y', 'x = z')
+  claim.formula = claim.formula.replace('u = v', 'u = w')
+  subsection.blocks[0].content = subsection.blocks[0].content.replace('p = q', 'p = r')
+  saveFromModel(id, content)
+  const after = readFileSync(path.join(root, THEOREM_REL), 'utf8')
+  assert.equal(after, FORMULA_THEOREM.replace('x = y', 'x = z').replace('u = v', 'u = w').replace('p = q', 'p = r'))
+})
+
+test('a save or a rewrap of an unchanged multi-line formula keeps the file byte for byte', () => {
+  const root = formulaFixture()
+  for (const save of [saveAll, saveAllThroughPanel]) assert.equal(save(root)[THEOREM_REL], FORMULA_THEOREM, save.name)
+  assert.equal(rewrapContentFile(FORMULA_THEOREM), FORMULA_THEOREM)
+})
+
+test('a rewrap writes a folded multi-line formula back as a literal block, its long line not folded', () => {
+  const fold = LONG_LINE.indexOf(' ', 60)
+  const folded = FORMULA_THEOREM.replace(`    content: |-\n      x = y \\\\\n      ${LONG_LINE}\n`,
+    `    content: >-\n      x = y \\\\\n\n      ${LONG_LINE.slice(0, fold)}\n      ${LONG_LINE.slice(fold + 1)}\n`)
+  assert.notEqual(folded, FORMULA_THEOREM)
+  assert.deepEqual(yaml.load(folded), yaml.load(FORMULA_THEOREM))
+  assert.equal(rewrapContentFile(folded), FORMULA_THEOREM)
 })
 
 test('the references section is the key and its lines, up to the next top-level key', () => {

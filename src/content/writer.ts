@@ -5,18 +5,20 @@ import { referencesSection } from './references';
 
 /**
  * How a save writes a content file: the keys in their type's order, the strings
- * normalized, the YAML dumped at 120 columns, and the `references` section put in as
- * given. Shared by saveFromModel and rewrapContentFile, so a file rewrapped from the
- * content repo is folded exactly as a save folds it.
+ * normalized, the YAML dumped at 120 columns with each multi-line string as a literal
+ * block, and the `references` section put in as given. Shared by saveFromModel and
+ * rewrapContentFile, so a file rewrapped from the content repo is folded exactly as a
+ * save folds it.
  */
 export function contentFileText(yamlDoc: Record<string, unknown>, type: string, referencesSource: string | null): string {
   const doc = { ...yamlDoc };
   if (referencesSource) doc['references'] = REFERENCES_PLACEHOLDER;
   else delete doc['references'];
-  const dumped = yaml.dump(
-    normalizeStrings(reorderYamlKeys(doc, type)) as Record<string, unknown>,
+  const literals: string[] = [];
+  const dumped = withLiteralBlocks(yaml.dump(
+    withLiteralPlaceholders(normalizeStrings(reorderYamlKeys(doc, type)), literals) as Record<string, unknown>,
     { lineWidth: 120, noCompatMode: true },
-  );
+  ), literals);
   return referencesSource ? withReferencesSection(dumped, referencesSource) : dumped;
 }
 
@@ -51,6 +53,54 @@ function withReferencesSection(dumped: string, section: string): string {
   }
   lines.splice(at, 1, section.replace(/\n$/, ''));
   return lines.join('\n');
+}
+
+// The only strings that keep their newlines through normalizeStrings are formula
+// sources, whose lines are the formula's rows. js-yaml folds a multi-line string once
+// one of its lines passes the width, and a folded block puts a blank line between the
+// rows, so each one is dumped as a placeholder and put back as a literal block.
+const LITERAL_PLACEHOLDER = 'yp-editor-literal-';
+
+function withLiteralPlaceholders(value: unknown, literals: string[]): unknown {
+  if (Array.isArray(value)) return value.map((item) => withLiteralPlaceholders(item, literals));
+  if (value === null || typeof value !== 'object' || value instanceof Date) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    const literal = typeof v === 'string' && v.includes('\n') ? literalBlockLines(v) : null;
+    if (literal) {
+      result[key] = LITERAL_PLACEHOLDER + literals.length;
+      literals.push(literal);
+    } else {
+      result[key] = withLiteralPlaceholders(v, literals);
+    }
+  }
+  return result;
+}
+
+// js-yaml writes a lone string unfolded as `|-` and its lines two spaces in, unless
+// it needs another chomping, an indentation indicator or double quotes.
+function literalBlockLines(value: string): string | null {
+  const dumped = yaml.dump(value, { lineWidth: -1, noCompatMode: true });
+  if (!dumped.startsWith('|-\n')) return null;
+  return dumped.slice('|-\n'.length).replace(/\n$/, '').split('\n').map((line) => line.slice(2)).join('\n');
+}
+
+function withLiteralBlocks(dumped: string, literals: string[]): string {
+  if (literals.length === 0) return dumped;
+  let placed = 0;
+  const text = dumped.replace(
+    new RegExp(`^((?: *- )* *)(.+): ${LITERAL_PLACEHOLDER}(\\d+)$`, 'gm'),
+    (_, lead: string, key: string, index: string) => {
+      placed++;
+      const indent = ' '.repeat(lead.length + 2);
+      const lines = literals[Number(index)].split('\n').map((line) => (line ? indent + line : ''));
+      return [`${lead}${key}: |-`, ...lines].join('\n');
+    },
+  );
+  if (placed !== literals.length) {
+    throw new Error('A formula could not be put in its place in the file, so nothing was saved.');
+  }
+  return text;
 }
 
 // Key order per type — keeps saved YAML stable instead of appending keys. The
