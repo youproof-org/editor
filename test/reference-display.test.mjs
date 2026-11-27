@@ -168,15 +168,21 @@ test('a token that is not rendered shows its name, as an error with the reason o
 
 function fakeClient(answer) {
   const calls = []
+  const pending = []
   return {
     calls,
     request(method, params) {
       calls.push({ method, params })
-      return new Promise((resolve) => setTimeout(() => resolve(answer(params)), 0))
+      const reply = new Promise((resolve) => setTimeout(resolve, 0)).then(() => answer(params))
+      pending.push(reply)
+      return reply
+    },
+    async settled() {
+      await null
+      while (pending.length) await Promise.allSettled(pending.splice(0))
     },
   }
 }
-const tick = () => new Promise((resolve) => setTimeout(resolve, 5))
 
 test('the panel asks for the displays it lacks in one request, and asks again for all of them on refresh', async () => {
   let version = 1
@@ -189,7 +195,7 @@ test('the panel asks for the displays it lacks in one request, and asks again fo
   assert.equal(store.get('a'), undefined)
   assert.equal(store.get('b'), undefined)
   store.get('a')
-  await tick()
+  await client.settled()
   assert.deepEqual(client.calls, [{ method: 'resolveReferenceTokens', params: { id: 'owner', payloads: ['a', 'b'] } }])
   assert.equal(store.get('a').segments[0].text, 'a1')
   assert.equal(notified, 1)
@@ -197,7 +203,7 @@ test('the panel asks for the displays it lacks in one request, and asks again fo
   version = 2
   store.refresh()
   assert.equal(store.get('a').segments[0].text, 'a1', 'the old display stays until the new one arrives')
-  await tick()
+  await client.settled()
   assert.equal(client.calls.length, 2)
   assert.deepEqual(client.calls[1].params.payloads, ['a', 'b'])
   assert.equal(store.get('b').segments[0].text, 'b2')
@@ -212,12 +218,13 @@ test('an answer that a refresh overtook is dropped, and a failed request shows o
   store.get('a')
   await Promise.resolve()
   store.refresh()
-  await tick()
+  await client.settled()
   assert.equal(store.get('a').segments[0].text, 'a2')
 
-  const failing = new ReferenceDisplayStore({ request: () => Promise.reject(new Error('nincs gazda')) }, 'owner')
+  const failingClient = fakeClient(() => { throw new Error('nincs gazda') })
+  const failing = new ReferenceDisplayStore(failingClient, 'owner')
   failing.get('a')
-  await tick()
+  await failingClient.settled()
   assert.equal(failing.get('a').error, 'The editor could not render this reference: nincs gazda')
 })
 
