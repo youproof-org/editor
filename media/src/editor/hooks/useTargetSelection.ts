@@ -11,12 +11,13 @@ import type {
 } from '../../shared/types';
 
 interface Params {
+  nodeId:           string;
   setDraft:         Dispatch<SetStateAction<ContentObjectData | null>>;
   setTargetObjects: Dispatch<SetStateAction<Record<string, ContentTargetObject>>>;
   markDirty:        () => void;
 }
 
-export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Params) {
+export function useTargetSelection({ nodeId, setDraft, setTargetObjects, markDirty }: Params) {
   const client = useClient();
   const [selectingSelectorId, setSelectingSelectorId] = useState<string | null>(null);
   // True iff this panel initiated the currently-in-flight target selection.
@@ -87,9 +88,9 @@ export function useTargetSelection({ setDraft, setTargetObjects, markDirty }: Pa
     if (targetType === 'external') {
       client.request('openExternalUrl', { url: targetId } as OpenExternalUrlRequest).catch(console.error);
     } else {
-      client.request('selectContentObject', { id: targetId } as SelectContentObjectRequest).catch(console.error);
+      client.request('selectContentObject', { id: targetId, openedFrom: nodeId } as SelectContentObjectRequest).catch(console.error);
     }
-  }, []);
+  }, [nodeId]);
 
   return {
     selectingSelectorId,

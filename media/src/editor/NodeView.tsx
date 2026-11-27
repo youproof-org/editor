@@ -52,7 +52,7 @@ export default function NodeView({ nodeId }: Props) {
     <ReferenceDisplaysContext.Provider value={referenceDisplays}>
     <TermEditingProvider setDraft={setDraft} draftRef={draftRef} markDirty={markDirty}>
     <BracketEditingProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
-    <TargetSelectionProvider setDraft={setDraft} setTargetObjects={setTargetObjects} markDirty={markDirty} targetObjects={targetObjects}>
+    <TargetSelectionProvider nodeId={nodeId} setDraft={setDraft} setTargetObjects={setTargetObjects} markDirty={markDirty} targetObjects={targetObjects}>
     <BlockOpsProvider draft={draft} setDraft={setDraft} markDirty={markDirty}>
     <ReferencePopupProvider nodeId={nodeId}>
       <div className="node-view">

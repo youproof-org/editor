@@ -71,16 +71,17 @@ interface ContentTreeItem {
 ### `selectContentObject`
 
 **Direction:** any webview → extension host  
-**Caller:** `TreeNodeView.tsx` on single-click (preview) and double-click (permanent)  
-**Params:** `{ id: string; permanent?: boolean }` — the model ID of the object to select; `permanent` promotes the panel out of preview mode  
+**Caller:** `TreeNodeView.tsx` on single-click (preview) and double-click (permanent); an editor panel when it opens a target, from an embed's Open or the reference popup's ↗ (`useTargetSelection.ts`)  
+**Params:** `{ id: string; permanent?: boolean; openedFrom?: string }` — the model ID of the object to select; `permanent` promotes the panel out of preview mode; `openedFrom` is the ID of the panel that opens the object as a target  
 **Result:** `{}` (opens or focuses the editor panel as a side-effect)
 
 The extension host:
 1. Resolves the file-backed entity: if `id` is not in `idToFilePath`, walks the parent chain via `findFileBacked()` to find the nearest file-backed ancestor.
-2. Opens or reveals the editor panel via `PanelManager.open()`. New panels always open as native VS Code preview tabs (italic tab title, `Tab.isPreview = true`). If there is already a different preview panel open, it is closed first.
-3. If `permanent` is `true`, immediately calls `PanelManager.promote()` to pin the tab (non-italic).
-4. If `id` differs from the current `selectedId`: stores `selectedId = id` and broadcasts a `contentObjectSelected` notification with the `id` to all webviews.
-5. If the same `id` is re-selected: only reveals the panel — no broadcast.
+2. If `openedFrom` names another panel than the one the object opens in, promotes that panel out of preview first (`PanelManager.promote()`), so the target's panel opens beside it instead of replacing it. The target's panel opens as a preview itself.
+3. Opens or reveals the editor panel via `PanelManager.open()`. New panels always open as native VS Code preview tabs (italic tab title, `Tab.isPreview = true`). If there is already a different preview panel open, it is closed first.
+4. If `permanent` is `true`, immediately calls `PanelManager.promote()` to pin the tab (non-italic).
+5. If `id` differs from the current `selectedId`: stores `selectedId = id` and broadcasts a `contentObjectSelected` notification with the `id` to all webviews.
+6. If the same `id` is re-selected: only reveals the panel — no broadcast.
 
 ---
 

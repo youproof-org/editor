@@ -16,7 +16,8 @@ export interface ContentTreeItem {
 // ─── Request types ─────────────────────────────────────────────────────────────
 
 export interface GetContentObjectRequest      { id: string; }
-export interface SelectContentObjectRequest   { id: string; permanent?: boolean; }
+/** `openedFrom` names the panel that opens the object as one of its targets: that panel is kept open beside it. */
+export interface SelectContentObjectRequest   { id: string; permanent?: boolean; openedFrom?: string; }
 export interface SaveRecursivelyRequest       { ids: string[]; }
 export interface OpenContentObjectFileRequest { id: string; }
 export interface SetContentObjectDirtyRequest { id: string; }

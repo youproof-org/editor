@@ -129,12 +129,13 @@ export class PanelManager implements vscode.CustomReadonlyEditorProvider<vscode.
     });
   }
 
-  promote(nodeId: string): void {
+  /** Takes the panel out of preview. The command acts on the active editor, which is the panel when the request comes from it. */
+  async promote(nodeId: string): Promise<void> {
     if (this._previewNodeId !== nodeId) return;
     this._previewNodeId = null;
     this._updateTitle(nodeId);
     if (!this._panels.has(nodeId)) return;
-    vscode.commands.executeCommand('workbench.action.keepEditor');
+    await vscode.commands.executeCommand('workbench.action.keepEditor');
   }
 
   isDirty(nodeId: string): boolean {

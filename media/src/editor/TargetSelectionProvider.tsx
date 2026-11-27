@@ -4,6 +4,7 @@ import { useTargetSelection } from './hooks/useTargetSelection';
 import type { ContentObjectData, ContentTargetObject } from '../shared/types';
 
 interface Props {
+  nodeId:           string;
   setDraft:         Dispatch<SetStateAction<ContentObjectData | null>>;
   setTargetObjects: Dispatch<SetStateAction<Record<string, ContentTargetObject>>>;
   markDirty:        () => void;
@@ -12,7 +13,7 @@ interface Props {
 }
 
 export default function TargetSelectionProvider({
-  setDraft, setTargetObjects, markDirty, targetObjects, children,
+  nodeId, setDraft, setTargetObjects, markDirty, targetObjects, children,
 }: Props) {
   const {
     selectingSelectorId,
@@ -20,7 +21,7 @@ export default function TargetSelectionProvider({
     handleEndSelectTarget,
     handleTargetSelected,
     handleOpenTarget,
-  } = useTargetSelection({ setDraft, setTargetObjects, markDirty });
+  } = useTargetSelection({ nodeId, setDraft, setTargetObjects, markDirty });
 
   const value = useMemo(() => ({
     targetObjects,

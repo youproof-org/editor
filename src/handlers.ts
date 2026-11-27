@@ -166,6 +166,7 @@ export function registerHandlers(ctx: HandlerContext): void {
     const name  = typeof obj?.['name']  === 'string' ? obj['name']  as string : entityId;
     const title = typeof obj?.['title'] === 'string' ? obj['title'] as string : undefined;
     const type  = typeof obj?.['type']  === 'string' ? obj['type']  as string : '';
+    if (p.openedFrom && p.openedFrom !== entityId) await panelManager.promote(p.openedFrom);
     panelManager.open(entityId, title ?? name, filePath, type);
     if (p.permanent) panelManager.promote(entityId);
 
