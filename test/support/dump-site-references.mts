@@ -11,7 +11,9 @@
 // InlineText renders for each reference of the owner's text fields, in the order
 // the page renders them, sentence-start capitalization included. Each reference
 // is rendered between two markers, which InlineText treats as whitespace, and the
-// HTML between them is read back as text, each link in brackets.
+// HTML between them is read back as text, each link in brackets. `selfReferences`
+// holds, for each figure whose lead-in has a `[*]`, in reading order, its
+// self-reference display as the site build fills it in, or null without one.
 import { createRequire } from 'node:module'
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -103,11 +105,25 @@ function inline(node: { references: Ref[] }, fields: unknown[]) {
   return out
 }
 
+function figures(blocks: unknown, out: (string | null)[] = []): (string | null)[] {
+  if (!Array.isArray(blocks)) return out
+  for (const block of blocks as Block[]) {
+    if (block.type === 'figure' && typeof block.leadIn === 'string' && block.leadIn.includes('[*]')) {
+      out.push((block.selfReference as { display?: string } | undefined)?.display || null)
+    }
+    if (block.type === 'details' || block.type === 'subsection') figures(block.blocks, out)
+  }
+  return out
+}
+
 const references: Record<string, unknown> = {}
 const inlined: Record<string, unknown> = {}
+const selfReferences: Record<string, unknown> = {}
 const add = (owner: string, node: { references: Ref[] }, fields: unknown[]) => {
   references[owner] = rendered(node)
   inlined[owner] = inline(node, fields)
+  const shown = fields.flatMap((field) => figures(field))
+  if (shown.length > 0) selfReferences[owner] = shown
 }
 for (const [fqn, chapter] of graph.chapters) {
   add(`chapter:${fqn}`, chapter, [chapter.abstract, chapter.prerequisiteWarning, chapter.prologue, chapter.epilogue])
@@ -116,5 +132,5 @@ for (const [fqn, chapter] of graph.chapters) {
 for (const [kind, map] of [['definition', graph.definitions], ['theorem', graph.theorems], ['proof', graph.proofs], ['remark', graph.remarks]] as const) {
   for (const [fqn, node] of map) add(`${kind}:${fqn}`, node, [node.body])
 }
-writeFileSync(process.argv[2], JSON.stringify({ references, inline: inlined }))
+writeFileSync(process.argv[2], JSON.stringify({ references, inline: inlined, selfReferences }))
 console.log(`${Object.keys(references).length} reference owners written to ${process.argv[2]}`)

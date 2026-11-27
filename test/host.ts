@@ -9,5 +9,7 @@ export * from '../src/content/numbering';
 export * from '../src/content/referenceDisplays';
 export * from '../src/protocol/referencePlacement';
 export * from '../src/content/referenceChoices';
+export * from '../src/content/selfReference';
+export { linkSegments } from '@youproof.org/display-templates';
 export { groupKeys, readReferences } from '@youproof.org/display-templates';
 export { parseRefTarget } from '@youproof.org/content-model';

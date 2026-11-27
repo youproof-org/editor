@@ -4,7 +4,7 @@ import { EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate, keymap }
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { Range } from '@codemirror/state';
 import { maskFormulas } from '../shared/formula';
-import { isInReferenceToken, referenceTokens } from './referenceTokens';
+import { isInReferenceToken, referenceTokens, setSelfReferenceDisplay, type SelfReferenceDisplay } from './referenceTokens';
 import { useReferenceDisplays } from './referenceDisplays';
 import {
   openReferencePopup, closeReferencePopup, ReferencePopupEdit, referencePopupField, referenceTokenAtCaret, referenceTokenClick,
@@ -22,6 +22,8 @@ interface Props {
   bracketAutocomplete?: boolean;
   onSpecialKey?: (key: 'Enter' | 'Backspace' | 'Delete') => boolean;
   allowSelfReference?: boolean;
+  /** What a `[*]` in the field shows: the figure's self-reference in its lead-in. Elsewhere `[*]` shows as an error. */
+  selfReference?: SelfReferenceDisplay;
   /** Whether the site reads references from the field: `[` opens the reference popup only where it does, and a token elsewhere shows as an error. */
   readsReferences: boolean;
 }
@@ -227,7 +229,7 @@ export interface CodeMirrorFieldHandle {
 }
 
 const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMirrorField(
-  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false, readsReferences }, ref,
+  { value, onChange, multiline = false, bracketAutocomplete = false, onSpecialKey, allowSelfReference = false, readsReferences, selfReference = 'none' }, ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef      = useRef<EditorView | null>(null);
@@ -425,7 +427,7 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
           bracketDeleteKeymap,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           vsCodeTheme,
-          referenceTokens({ displays: referenceDisplays, readsReferences }),
+          referenceTokens({ displays: referenceDisplays, readsReferences, selfReference }),
           referenceTokenClick.of((view, from, to) => { openPopup(view, 'edit', from, to); }),
           ...(bracketAutocomplete ? [syntaxPlugin] : []),
           EditorView.lineWrapping,
@@ -512,6 +514,10 @@ const CodeMirrorField = forwardRef<CodeMirrorFieldHandle, Props>(function CodeMi
       view.destroy();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setSelfReferenceDisplay.of(selfReference) });
+  }, [selfReference]);
 
   useEffect(() => {
     const view = viewRef.current;

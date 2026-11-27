@@ -201,6 +201,19 @@ The webview shows a rendered token in purple, each link segment in brackets, wit
 
 ---
 
+### `resolveSelfReference`
+
+**Direction:** editor panel → extension host  
+**Caller:** `useSelfReferenceDisplay` (`media/src/editor/hooks/useSelfReferenceDisplay.ts`), for a figure block's lead-in, whenever the panel's self-reference display of the figure changes, and again on a `referenceDisplaysChanged` notification  
+**Params:** `{ id: string; blockId: string; display: string }`: the panel's content object, the figure block, and the self-reference display the panel holds for it, saved or not  
+**Result:** `{ display: ReferenceTokenDisplay }`, with each link's `target` empty
+
+The host renders the figure's `[*]` as the site does (`src/content/selfReference.ts`): it numbers the figure `{chapter}.{n}.` among the figures of the first chapter that shows it, in the order the website's `walkFigureBlocks` walks a chapter (prologue, sections, epilogue, into subsections, details and embedded entities), fills the display's `{...}` in with that number, and splits it at its brackets with `linkSegments`. A figure no chapter shows keeps its display as written, as on the site. It is an error when the display is empty, since the site then shows `[*]` as an error, and for a figure the loaded content doesn't hold yet, which is numbered once the file is saved.
+
+In the webview a `[*]` the site reads (at the top level or inside bold, not inside `$...$` or `^...^`) is an atomic widget like a reference token, shown with this display and capitalized by the same sentence-start rule. In any field but a figure's lead-in it is in the error state, as the site shows it there. It has no popup. It is saved as the `[*]` it is.
+
+---
+
 ### `saveContentObject`
 
 **Direction:** editor panel → extension host  

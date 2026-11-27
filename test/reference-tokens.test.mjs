@@ -8,7 +8,8 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const {
   EditorState, EditorSelection, EditorView, history, undo, redo, referenceTokens, referenceTokenText, isInReferenceToken,
-  encodeReferenceToken, findReferenceTokens,
+  encodeReferenceToken, findReferenceTokens, deleteCharBackward, deleteCharForward, selfReferencePlacements, selfReferenceTokenView,
+  setSelfReferenceDisplay,
 } = require('../out/test/webview.js')
 
 const A = { text: '[a]', target: 'definitions.a' }
@@ -114,4 +115,47 @@ test('a field the site reads no references from shows its tokens as errors', () 
   const displays = { get: () => ({ segments: [{ kind: 'link', text: 'x', target: 't' }] }), subscribe: () => () => {} }
   const state = EditorState.create({ doc: tokenA, extensions: [referenceTokens({ displays, readsReferences: false })] })
   assert.match(shown(state)[0].reason, /reads no references in this field/)
+})
+
+const FIGURE = { segments: [{ kind: 'text', text: 'az ' }, { kind: 'link', text: '26.3. ábrán', target: '' }, { kind: 'text', text: '' }] }
+const figureLeadIn = (doc, selfReference = FIGURE) =>
+  EditorState.create({ doc, extensions: [history(), referenceTokens({ readsReferences: true, selfReference })] })
+
+test('a figure\'s [*] shows its self-reference, capitalized where the site starts a sentence with it', () => {
+  let state = figureLeadIn('Ahogy [*] látható. [*] mutatja, és **[*]** is.')
+  assert.deepEqual(shown(state).map(referenceTokenText), ['az [26.3. ábrán]', 'Az [26.3. ábrán]', 'az [26.3. ábrán]'])
+  state = state.update({ effects: setSelfReferenceDisplay.of({ error: 'nincs' }) }).state
+  assert.deepEqual(shown(state).map((view) => [view.state, view.reason]), [['error', 'nincs'], ['error', 'nincs'], ['error', 'nincs']],
+    'a new self-reference display shows at once')
+  assert.match(shown(figureLeadIn('[*]', 'none'))[0].reason, /only in a figure's lead-in/)
+  assert.equal(shown(figureLeadIn('[*]', 'pending'))[0].state, 'pending')
+  assert.deepEqual(shown(figureLeadIn('$[*]$ és ^[*]^')), [], 'inside $...$ and ^...^ the site reads no [*]')
+  assert.deepEqual(shown(EditorState.create({ doc: '[*]', extensions: [referenceTokens({ readsReferences: false })] })), [])
+})
+
+test('a [*] is one unit: deleted whole, never cut by a selection, and undone whole', () => {
+  const doc = 'Lásd [*] itt.'
+  let state = figureLeadIn(doc)
+  state = state.update({ selection: EditorSelection.cursor(8) }).state
+  state = run(state, deleteCharBackward)
+  assert.equal(state.doc.toString(), 'Lásd  itt.', 'Backspace after it removes it whole')
+  state = run(state, undo)
+  assert.equal(state.doc.toString(), doc)
+  state = state.update({ selection: EditorSelection.cursor(5) }).state
+  state = run(state, deleteCharForward)
+  assert.equal(state.doc.toString(), 'Lásd  itt.', 'Delete before it too')
+  state = figureLeadIn(doc).update({ selection: EditorSelection.range(2, 6) }).state
+  assert.deepEqual([state.selection.main.anchor, state.selection.main.head], [2, 8], 'a selection ending inside takes it whole')
+  state = state.update({ changes: { from: 6, insert: 'x' } }).state
+  assert.equal(state.doc.toString(), 'Lásd [*]x itt.', 'text typed inside goes after it')
+  assert.ok(isInReferenceToken(doc, 5) && isInReferenceToken(doc, 7) && !isInReferenceToken(doc, 8))
+  const math = figureLeadIn('$[*]$').update({ selection: EditorSelection.cursor(2) }).state
+  assert.equal(math.selection.main.head, 2, 'inside math it is plain text')
+})
+
+test('the [*] the site reads are found where it reads them, with their sentence starts', () => {
+  assert.deepEqual(selfReferencePlacements('[*] és $[*]$, **[*]**. Vége.&nbsp;[*]'), [
+    { from: 0, to: 3, sentenceStart: true }, { from: 16, to: 19, sentenceStart: false }, { from: 34, to: 37, sentenceStart: true },
+  ])
+  assert.equal(selfReferenceTokenView(FIGURE, { sentenceStart: true }).parts[0].text, 'Az ')
 })

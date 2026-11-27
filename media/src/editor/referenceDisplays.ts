@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { MessageClient } from '../shared/messageClient';
-import type { ReferenceTokenDisplay, ResolveReferenceTokensResponse } from '../shared/types';
+import type { ReferenceTokenDisplay, ResolveReferenceTokensResponse, ResolveSelfReferenceResponse } from '../shared/types';
 
 /** The rendered references a text field shows, by token payload. */
 export interface ReferenceDisplaySource {
@@ -8,6 +8,10 @@ export interface ReferenceDisplaySource {
   get(payload: string): ReferenceTokenDisplay | undefined;
   /** Called whenever a display arrives or changes. */
   subscribe(listener: () => void): () => void;
+  /** Counts the refreshes, after which a figure's self-reference is asked for again. */
+  readonly revision: number;
+  /** The `[*]` of the figure `blockId` as the site shows it with `display`. */
+  resolveSelfReference(blockId: string, display: string): Promise<ReferenceTokenDisplay>;
 }
 
 /**
@@ -35,12 +39,22 @@ export class ReferenceDisplayStore implements ReferenceDisplaySource {
     return () => { this.listeners.delete(listener); };
   }
 
+  get revision(): number {
+    return this.generation;
+  }
+
+  resolveSelfReference(blockId: string, display: string): Promise<ReferenceTokenDisplay> {
+    return this.client.request<ResolveSelfReferenceResponse>('resolveSelfReference', { id: this.ownerId, blockId, display })
+      .then((response) => response.display);
+  }
+
   refresh(): void {
     this.generation++;
     const known = [...this.requested];
     this.requested.clear();
     this.queued.clear();
     for (const payload of known) this.queue(payload);
+    for (const listener of [...this.listeners]) listener();
   }
 
   private queue(payload: string): void {

@@ -33,3 +33,23 @@ export function referencePlacements(text: string): ReferencePlacement[] {
   }
   return placements;
 }
+
+/** A figure's `[*]` where the site reads it in a text. */
+export interface SelfReferencePlacement {
+  from: number;
+  to: number;
+  /** Whether the site capitalizes it, as the start of a sentence. */
+  sentenceStart: boolean;
+}
+
+/**
+ * Every `[*]` of `text` the site reads as a self-reference, in order: at the top
+ * level and inside bold, not inside `$...$` or `^...^`. Decoding the entities
+ * changes no token, only offsets and sentence starts, so the two walks find the
+ * same tokens in the same order.
+ */
+export function selfReferencePlacements(text: string): SelfReferencePlacement[] {
+  const self = <T extends { token: { kind: string } }>(found: Iterable<T>) => [...found].filter(({ token }) => token.kind === 'self-ref');
+  const decoded = self(renderedReferences(decodeInlineEntities(text)));
+  return self(renderedReferences(text)).map(({ start, source }, i) => ({ from: start, to: start + source.length, sentenceStart: decoded[i].sentenceStart }));
+}

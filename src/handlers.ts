@@ -17,6 +17,7 @@ import {
 } from './content/references';
 import type { ReferenceResolution } from './content/numbering';
 import { resolveReferenceTokens } from './content/referenceDisplays';
+import { resolveSelfReference } from './content/selfReference';
 import { buildReferenceChoices } from './content/referenceChoices';
 import { getLocales } from './content/locales';
 import { resolveServicesRoot, ServicesDataError, type ServicesData } from './content/servicesData';
@@ -37,6 +38,8 @@ import type {
   EndSelectTargetRequest,
   OpenExternalUrlRequest,
   GetSelfReferenceDisplaySuggestionsResponse,
+  ResolveSelfReferenceRequest,
+  ResolveSelfReferenceResponse,
   ResolveReferenceTokensRequest,
   ResolveReferenceTokensResponse,
   GetReferenceChoicesRequest,
@@ -378,6 +381,13 @@ export function registerHandlers(ctx: HandlerContext): void {
       return { displays: Object.fromEntries(p.payloads.map((payload) => [payload, { error: resolution }])) };
     }
     return { displays: resolveReferenceTokens(p.payloads, String(obj['locale'] ?? getActiveLocale()), resolution) };
+  });
+
+  server.onRequest('resolveSelfReference', async (params): Promise<ResolveSelfReferenceResponse> => {
+    const p = params as ResolveSelfReferenceRequest;
+    const content = getContent();
+    if (!content.idToObject.has(p.id)) throw new Error(`Object not found: ${p.id}`);
+    return { display: resolveSelfReference(content, p.blockId, p.display) };
   });
 
   server.onRequest('getReferenceChoices', async (params): Promise<GetReferenceChoicesResponse> => {

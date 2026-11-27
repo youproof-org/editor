@@ -4,7 +4,9 @@ import {
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet } from '@codemirror/view';
 import { capitalizeSegments } from '@youproof.org/display-templates';
 import { decodeReferencePayload, findReferenceTokens, referenceTokenLabel, type ReferenceTokenMatch } from '../shared/referenceToken';
-import { referencePlacements, type ReferencePlacement } from '../shared/referencePlacement';
+import {
+  referencePlacements, selfReferencePlacements, type ReferencePlacement, type SelfReferencePlacement,
+} from '../shared/referencePlacement';
 import type { ReferenceTokenDisplay } from '../shared/types';
 import type { ReferenceDisplaySource } from './referenceDisplays';
 import { referencePopupField, referenceTokenClick, type ReferencePopupSession } from './referencePopupState';
@@ -49,13 +51,36 @@ export function referenceTokenView(
   };
 }
 
+/**
+ * What a field's `[*]` shows: the figure's self-reference as the host rendered
+ * it, `pending` while it renders, or `none` in a field where the site shows `[*]`
+ * as an error, any field but a figure's lead-in.
+ */
+export type SelfReferenceDisplay = ReferenceTokenDisplay | 'pending' | 'none';
+
+const selfNamed = (state: ReferenceTokenView['state'], reason?: string): ReferenceTokenView =>
+  ({ state, parts: [{ text: '*' }], ...(reason ? { reason } : {}) });
+
+/** What a `[*]` shows where it sits, capitalized where the site starts a sentence with it. */
+export function selfReferenceTokenView(display: SelfReferenceDisplay, placement: Pick<SelfReferencePlacement, 'sentenceStart'>): ReferenceTokenView {
+  if (display === 'none') return selfNamed('error', 'The site reads [*] only in a figure\'s lead-in, and shows it as an error here.');
+  if (display === 'pending') return selfNamed('pending');
+  if (display.error !== undefined) return selfNamed('error', display.error);
+  const segments = placement.sentenceStart ? capitalizeSegments(display.segments) : display.segments;
+  return {
+    state: 'rendered',
+    parts: segments.filter((segment) => segment.text !== '' || segment.kind === 'link')
+      .map((segment) => (segment.kind === 'link' ? { text: segment.text, target: segment.target } : { text: segment.text })),
+  };
+}
+
 /** The view as plain text, each link in brackets. */
 export function referenceTokenText(view: ReferenceTokenView): string {
   return view.parts.map((part) => (part.target === undefined ? part.text : `[${part.text}]`)).join('');
 }
 
-/** How a token stands out: `active` while its popup is open, `ghost` for the draft of a popup that creates one. */
-type WidgetRole = 'token' | 'active' | 'ghost';
+/** How a token stands out: `active` while its popup is open, `ghost` for the draft of a popup that creates one, `self` for a `[*]`, which has no popup. */
+type WidgetRole = 'token' | 'active' | 'ghost' | 'self';
 
 class ReferenceWidget extends WidgetType {
   private readonly key: string;
@@ -68,7 +93,7 @@ class ReferenceWidget extends WidgetType {
     const span = document.createElement('span');
     span.className = `cm-yp-ref cm-yp-ref-${this.view.state}${this.role === 'token' ? '' : ` cm-yp-ref-${this.role}`}`;
     if (this.view.reason) span.dataset.tip = this.view.reason;
-    if (this.role !== 'ghost') {
+    if (this.role === 'token' || this.role === 'active') {
       span.addEventListener('mousedown', (event) => {
         const open = editor.state.facet(referenceTokenClick);
         if (!open || event.button !== 0) return;
@@ -89,7 +114,7 @@ class ReferenceWidget extends WidgetType {
       } else {
         const link = document.createElement('span');
         link.className = 'cm-yp-ref-link';
-        link.dataset.tip = part.target;
+        if (part.target) link.dataset.tip = part.target;
         link.textContent = `[${part.text}]`;
         span.append(link);
       }
@@ -103,9 +128,21 @@ export interface ReferenceTokenOptions {
   displays?: ReferenceDisplaySource | null;
   /** Whether the site reads references from this field. */
   readsReferences?: boolean;
+  /** What the field's `[*]` shows at first; `setSelfReferenceDisplay` changes it. */
+  selfReference?: SelfReferenceDisplay;
 }
 
 const displaysChanged = StateEffect.define<null>();
+
+/** The field's `[*]` now shows this. */
+export const setSelfReferenceDisplay = StateEffect.define<SelfReferenceDisplay>();
+
+function selfReferenceField(initial: SelfReferenceDisplay) {
+  return StateField.define<SelfReferenceDisplay>({
+    create: () => initial,
+    update: (value, tr) => tr.effects.reduce((v, effect) => (effect.is(setSelfReferenceDisplay) ? effect.value : v), value),
+  });
+}
 
 function decodedItem(payload: string): unknown {
   try {
@@ -115,7 +152,9 @@ function decodedItem(payload: string): unknown {
   }
 }
 
-function tokenDecorations(state: EditorState, options: ReferenceTokenOptions): DecorationSet {
+function tokenDecorations(
+  state: EditorState, options: ReferenceTokenOptions, selfField: StateField<SelfReferenceDisplay>,
+): DecorationSet {
   const text = state.doc.toString();
   const session = state.field(referencePopupField, false) ?? null;
   const view = (payload: string, item: unknown, placement: ReferencePlacement): ReferenceTokenView => {
@@ -130,8 +169,11 @@ function tokenDecorations(state: EditorState, options: ReferenceTokenOptions): D
     return Decoration.replace({ widget: new ReferenceWidget(view(payload, item, placements[i]), active ? 'active' : 'token') })
       .range(token.from, token.to);
   });
+  const self = options.readsReferences === false ? [] : selfReferencePlacements(text).map((placement) =>
+    Decoration.replace({ widget: new ReferenceWidget(selfReferenceTokenView(state.field(selfField), placement), 'self') })
+      .range(placement.from, placement.to));
   const ghost = session?.mode === 'create' && session.preview ? ghostDecoration(text, session, view) : null;
-  return Decoration.set(ghost ? [...decorations, ghost] : decorations, true);
+  return Decoration.set([...decorations, ...self, ...(ghost ? [ghost] : [])], true);
 }
 
 /** The draft of a create popup where it would go, shown as the token it would be. */
@@ -147,12 +189,12 @@ function ghostDecoration(
     : Decoration.replace({ widget }).range(session.from, session.to);
 }
 
-function referenceTokenField(options: ReferenceTokenOptions) {
+function referenceTokenField(options: ReferenceTokenOptions, selfField: StateField<SelfReferenceDisplay>) {
   return StateField.define<DecorationSet>({
-    create: (state) => tokenDecorations(state, options),
-    update: (decorations, tr) => (tr.docChanged || tr.effects.some((effect) => effect.is(displaysChanged)) ||
+    create: (state) => tokenDecorations(state, options, selfField),
+    update: (decorations, tr) => (tr.docChanged || tr.effects.some((effect) => effect.is(displaysChanged) || effect.is(setSelfReferenceDisplay)) ||
       tr.startState.field(referencePopupField, false) !== tr.state.field(referencePopupField, false)
-      ? tokenDecorations(tr.state, options)
+      ? tokenDecorations(tr.state, options, selfField)
       : decorations),
     provide: (field) => [
       EditorView.decorations.from(field),
@@ -168,14 +210,21 @@ function rerenderOnDisplayChange(source: ReferenceDisplaySource): Extension {
   });
 }
 
-const strictlyInside = (pos: number, token: ReferenceTokenMatch): boolean => token.from < pos && pos < token.to;
+type Span = { from: number; to: number };
 
-/** Whether `pos` is a character of a reference token. */
-export function isInReferenceToken(doc: string, pos: number): boolean {
-  return findReferenceTokens(doc).some((token) => token.from <= pos && pos < token.to);
+const strictlyInside = (pos: number, token: Span): boolean => token.from < pos && pos < token.to;
+
+/** The reference tokens of `doc`, and the `[*]` the site reads where it reads references, which are never cut. */
+function wholeSpans(doc: string, readsReferences = true): Span[] {
+  return readsReferences ? [...findReferenceTokens(doc), ...selfReferencePlacements(doc)] : findReferenceTokens(doc);
 }
 
-function clampRange(range: SelectionRange, tokens: readonly ReferenceTokenMatch[], previousHead: number): SelectionRange {
+/** Whether `pos` is a character of a reference token or of a `[*]`. */
+export function isInReferenceToken(doc: string, pos: number): boolean {
+  return wholeSpans(doc).some((token) => token.from <= pos && pos < token.to);
+}
+
+function clampRange(range: SelectionRange, tokens: readonly Span[], previousHead: number): SelectionRange {
   const token = (pos: number) => tokens.find((t) => strictlyInside(pos, t));
   if (range.empty) {
     const inside = token(range.head);
@@ -191,13 +240,13 @@ function clampRange(range: SelectionRange, tokens: readonly ReferenceTokenMatch[
 }
 
 /**
- * A reference token is never cut: a change that starts or ends inside one is
- * widened to take the whole token, text inserted inside one goes after it, and a
- * selection that would start or end inside one is moved to its edges.
+ * A reference token or a `[*]` is never cut: a change that starts or ends inside
+ * one is widened to take the whole token, text inserted inside one goes after it,
+ * and a selection that would start or end inside one is moved to its edges.
  */
-const keepTokensWhole = EditorState.transactionFilter.of((tr) => {
+const keepTokensWhole = (readsReferences: boolean | undefined) => EditorState.transactionFilter.of((tr) => {
   if (tr.docChanged) {
-    const tokens = findReferenceTokens(tr.startState.doc.toString());
+    const tokens = wholeSpans(tr.startState.doc.toString(), readsReferences);
     if (tokens.length === 0) return tr;
     const changes: ChangeSpec[] = [];
     let widened = false;
@@ -219,7 +268,7 @@ const keepTokensWhole = EditorState.transactionFilter.of((tr) => {
     };
   }
   if (!tr.selection) return tr;
-  const tokens = findReferenceTokens(tr.newDoc.toString());
+  const tokens = wholeSpans(tr.newDoc.toString(), readsReferences);
   const previous = tr.startState.selection.main.head;
   const clamped = EditorSelection.create(tr.selection.ranges.map((range) => clampRange(range, tokens, previous)), tr.selection.mainIndex);
   if (clamped.eq(tr.selection)) return tr;
@@ -231,12 +280,15 @@ const keepTokensWhole = EditorState.transactionFilter.of((tr) => {
  * over it and Backspace or Delete removes it whole. It shows the reference as the
  * site renders it, with each link in brackets, rendered again when the displays
  * change and wherever the token moves, since the start of a sentence capitalizes it.
+ * A `[*]` shows the same way, as the figure's self-reference.
  */
 export function referenceTokens(options: ReferenceTokenOptions = {}): Extension {
+  const selfField = selfReferenceField(options.selfReference ?? 'none');
   return [
     referencePopupField,
-    referenceTokenField(options),
-    keepTokensWhole,
+    selfField,
+    referenceTokenField(options, selfField),
+    keepTokensWhole(options.readsReferences),
     ...(options.displays ? [rerenderOnDisplayChange(options.displays)] : []),
   ];
 }

@@ -1,6 +1,7 @@
 import CodeMirrorField from '../CodeMirrorField';
 import Field from './Field';
 import SuggestionInput from '../SuggestionInput';
+import { useSelfReferenceDisplay } from '../hooks/useSelfReferenceDisplay';
 import { useClient } from '../../shared/clientContext';
 import type { ContentFigureBlock, GetSelfReferenceDisplaySuggestionsResponse } from '../../shared/types';
 
@@ -11,6 +12,7 @@ interface Props {
 
 export default function FigureBlock({ block, onBlockChange }: Props) {
   const client = useClient();
+  const selfReference = useSelfReferenceDisplay(block.id, block.selfReference?.display ?? '');
   return (
     <>
       <Field label="Self-reference">
@@ -27,7 +29,7 @@ export default function FigureBlock({ block, onBlockChange }: Props) {
         />
       </Field>
       <Field label="Lead-in">
-        <CodeMirrorField readsReferences value={block.leadIn ?? ''} bracketAutocomplete allowSelfReference
+        <CodeMirrorField readsReferences value={block.leadIn ?? ''} bracketAutocomplete allowSelfReference selfReference={selfReference}
           onChange={v => onBlockChange({ ...block, leadIn: v })} />
       </Field>
       <Field label="Alt">

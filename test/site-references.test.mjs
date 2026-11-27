@@ -23,7 +23,7 @@ Module._load = function (request, ...rest) {
 
 const {
   loadContent, readServicesData, readDisplayTemplates, numberContent, editorOutline, resolveFileReferences, heldReferenceItems,
-  heldReferenceTexts, resolveReferenceToken, findReferenceTokens, referencePlacements,
+  heldReferenceTexts, resolveReferenceToken, findReferenceTokens, referencePlacements, resolveSelfReference, linkSegments,
 } = await import('../out/test/host.js')
 const { referenceTokenView, referenceTokenText } = await import('../out/test/webview.js')
 
@@ -63,7 +63,7 @@ function load() {
     }
   }
   for (const [entity, fqn] of editorOutline(content).names) owners.push([`${entity.type}:${fqn}`, entity])
-  loaded = { site, numbering, resolution, owners }
+  loaded = { site, content, numbering, resolution, owners }
   return loaded
 }
 
@@ -125,4 +125,31 @@ test('every reference token shows what the site renders for it, capitalized wher
   t.diagnostic(`${tokens} tokens shown, ${matched} as the site renders them, ${capitalized} at the start of a sentence`)
   assert.deepEqual(mismatches.slice(0, 20), [])
   assert.equal(matched, tokens)
+})
+
+function modelFigures(blocks, out = []) {
+  for (const block of blocks ?? []) {
+    if (block.blockType === 'figure' && block.leadIn?.includes('[*]')) out.push(block)
+    if (block.blockType === 'details' || block.blockType === 'subsection') modelFigures(block.blocks, out)
+  }
+  return out
+}
+
+test('every figure\'s [*] shows the self-reference the site fills in for it', { skip }, (t) => {
+  const { site: { selfReferences: site = {} }, content, owners } = load()
+  const fields = (owner) => (owner.type === 'chapter' ? ['abstract', 'prerequisiteWarning', 'prologue', 'epilogue'] : ['body'])
+  const asSite = (display) => display.segments.map((s) => (s.kind === 'link' ? `[${s.text}]` : s.text)).join('')
+  let figures = 0
+  const mismatches = []
+  for (const [key, owner] of owners) {
+    const shown = fields(owner).flatMap((field) => modelFigures(owner[field]))
+      .map((block) => resolveSelfReference(content, block.id, block.selfReference?.display ?? ''))
+      .map((display) => (display.error === undefined ? asSite(display) : null))
+    const expected = (site[key] ?? []).map((display) => (display === null ? null : asSite({ segments: linkSegments(display, '') })))
+    figures += shown.length
+    if (JSON.stringify(shown) !== JSON.stringify(expected)) mismatches.push(`${key}: editor ${JSON.stringify(shown)}, site ${JSON.stringify(expected)}`)
+  }
+  t.diagnostic(`${figures} figures with [*]`)
+  assert.ok(figures > 0, 'the checkout has figures with [*]')
+  assert.deepEqual(mismatches.slice(0, 20), [])
 })

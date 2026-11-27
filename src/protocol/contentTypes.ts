@@ -31,6 +31,9 @@ export interface GetSelfReferenceDisplaySuggestionsResponse { suggestions: strin
 /** Render held reference tokens, named by their payloads, as they render in the file `id`. */
 export interface ResolveReferenceTokensRequest { id: string; payloads: string[]; }
 export interface ResolveReferenceTokensResponse { displays: Record<string, ReferenceTokenDisplay>; }
+/** The `[*]` of the figure `blockId` in the panel `id`, shown with `display`, the self-reference display the panel holds. */
+export interface ResolveSelfReferenceRequest { id: string; blockId: string; display: string; }
+export interface ResolveSelfReferenceResponse { display: ReferenceTokenDisplay; }
 /** What the reference popup of the panel `id` offers: the display templates and the targets of the loaded content. */
 export interface GetReferenceChoicesRequest { id: string; }
 export type GetReferenceChoicesResponse = ReferenceChoices;
