@@ -134,7 +134,10 @@ test('a token is capitalized where the site starts a sentence with it', () => {
   assert.deepEqual(placements(`${t} és ${t}. ${t}? ${t}! ${t}`), ['start', 'mid', 'start', 'start', 'start'])
   assert.deepEqual(placements(`  ${t}`), ['start'], 'leading whitespace')
   assert.deepEqual(placements(`Lásd.&nbsp;${t}`), ['start'], 'the site reads entities first')
-  assert.deepEqual(placements(`Lásd **${t}** és **mint ${t}**`), ['start', 'mid'], 'inside bold the bold text is the sentence')
+  assert.deepEqual(placements(`Lásd **${t}** és **mint ${t}**`), ['mid', 'mid'], 'a bold run in mid-sentence starts none')
+  assert.deepEqual(placements(`Ha $n$ ***${t}hatvány***, akkor`), ['mid'], 'nor does a bold-italic one')
+  assert.deepEqual(placements(`**${t}** áll. Vége. ***${t} x*** és **x. ${t}**`), ['start', 'start', 'start'],
+    'a bold run that starts a sentence starts it, and a sentence end inside a run still does')
   assert.deepEqual(placements(`$x ${t}$ és ^${t}^ de ${t}`), ['unread', 'unread', 'mid'])
   assert.deepEqual(placements(`[0]. ${t}`), ['start'], 'an index typed as text counts as text before it')
 })

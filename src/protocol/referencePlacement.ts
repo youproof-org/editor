@@ -1,4 +1,4 @@
-import { atSentenceStart, decodeInlineEntities, inlineTokens } from '@youproof.org/display-templates';
+import { decodeInlineEntities, renderedReferences } from '@youproof.org/display-templates';
 import { findReferenceTokens } from './referenceToken';
 
 /** Where the site puts a reference token of a text when it renders the text. */
@@ -11,9 +11,8 @@ export interface ReferencePlacement {
 
 /**
  * One placement per reference token of `text`, in order, worked out the way the
- * site renders the text once the tokens are numbered: with its entities decoded, at
- * the top level and inside bold, where a reference inside bold starts a sentence
- * when it starts the bold.
+ * site renders the text once the tokens are numbered, by the site's own
+ * `renderedReferences`: with its entities decoded, at the top level and inside bold.
  */
 export function referencePlacements(text: string): ReferencePlacement[] {
   const held = findReferenceTokens(text);
@@ -27,15 +26,10 @@ export function referencePlacements(text: string): ReferencePlacement[] {
     last = token.to;
   });
   numbered += text.slice(last);
-  const scan = (part: string): void => {
-    for (const { token, start } of inlineTokens(part)) {
-      if (token.kind === 'ref' && token.index >= base && token.index - base < held.length) {
-        placements[token.index - base] = { read: true, sentenceStart: atSentenceStart(part, start) };
-      } else if (token.kind === 'bold' || token.kind === 'bold-italic') {
-        scan(token.inner);
-      }
+  for (const { token, sentenceStart } of renderedReferences(decodeInlineEntities(numbered))) {
+    if (token.kind === 'ref' && token.index >= base && token.index - base < held.length) {
+      placements[token.index - base] = { read: true, sentenceStart };
     }
-  };
-  scan(decodeInlineEntities(numbered));
+  }
   return placements;
 }
