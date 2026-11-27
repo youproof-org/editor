@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - development
+  push:
+    branches:
+      - development
+      - stable/released
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editor
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: editor
+
+      # The build bundles packages from a services checkout beside this repo.
+      # A branch that changes both repos uses the services branch of the same
+      # name; any other branch builds against services' development.
+      - name: Pick the services branch
+        id: services
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads https://github.com/youproof-org/services.git "refs/heads/$BRANCH" > /dev/null; then
+            ref="$BRANCH"
+          else
+            ref=development
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: youproof-org/services
+          ref: ${{ steps.services.outputs.ref }}
+          path: services
+
+      - name: Log the services commit
+        working-directory: services
+        env:
+          REF: ${{ steps.services.outputs.ref }}
+        run: echo "::notice title=services::$(git rev-parse HEAD) on $REF"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: editor/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for the browser tests
+        run: npx playwright install --with-deps chromium
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Browser tests
+        run: npm run test:ui

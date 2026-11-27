@@ -18,3 +18,7 @@ The extension bundles two packages from a services checkout, `@youproof.org/cont
 - `npm run release`: also requires the services checkout to be clean, and names its commit in the release notes.
 
 A new template or label variant reaches the editor through the content and services data it reads at runtime. A change to the packages themselves, such as a new builtin, reaches it only in a new editor build.
+
+## CI
+
+`.github/workflows/ci.yml` runs `npm ci`, `npm test` and `npm run test:ui` on Node 24.18.0 for pull requests into `development` and for pushes to `development` and `stable/released`. It checks out services beside the editor, at the services branch with the same name as the editor branch when there is one and at `development` otherwise, and logs the services commit it used as a notice on the run. Services needs no install for this, since the build reads only the two packages' sources. The real-content tests are skipped in CI, because the content repo is private.
