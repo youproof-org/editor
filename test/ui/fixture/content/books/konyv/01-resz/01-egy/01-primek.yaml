@@ -1,0 +1,49 @@
+type: section
+name: primek
+slug: primek
+locale: hu
+title: Prímek
+references:
+  - { text: '[prím]', target: definitions.prim.terms.prime }
+  - { text: '[prím]', target: definitions.prim.terms.prime }
+  - { display: the-index-label-ine, target: theorems.alaptetel }
+  - { display: the-index-label, target: theorems.alaptetel }
+  - { text: '[osztó]', target: definitions.oszto }
+  - { display: the-index-label, target: definitions.prim }
+  - { text: '[prímszám]', target: definitions.prim.terms.prime }
+  - { text: '[Wikipédia]', target: "https://hu.wikipedia.org/wiki/Pr%C3%ADmsz%C3%A1m" }
+  - { display: the-index-label, target: definitions.oszto }
+  - { text: '[osztó]', target: definitions.oszto }
+body:
+  - type: narrative
+    content: >-
+      Egy [0] szám csak eggyel és önmagával osztható. Ha $n$ ***[1]hatvány***, akkor más a helyzet. **[2]** áll
+      itt. Lásd még **[3]**.
+  - type: embed
+    target: definitions.prim
+  - type: formula
+    lead-in: 'Ekkor [4] szerint:'
+    content: a^2 + b^2 = c^2
+  - type: figure
+    self-reference:
+      display: '{the(target.index)} [{target.index} ábrán]'
+    lead-in: 'Ahogy [*] látható, [5] így néz ki.'
+    src: abra
+    caption: Egy ábra a [6] fogalmáról.
+  - type: quote
+    lead-in: 'Ahogy [7] írja:'
+    quote: Egy idézet.
+  - type: typewriter
+    lead-in: 'Egy gépelt szöveg:'
+    rows:
+      - első sor
+      - második sor
+  - type: ordered-list
+    lead-in: 'A [8] tulajdonságai:'
+    items:
+      - 'Az első [9] tulajdonság.'
+      - A második tulajdonság.
+  - type: narrative
+    content: >-
+      Ez a bekezdés szándékosan rövidebb sorokra van tördelve, mint ahogy az
+      editor tördelné, hogy egy változatlan mentés ne tördelje újra.

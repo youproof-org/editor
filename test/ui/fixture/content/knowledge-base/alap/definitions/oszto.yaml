@@ -1,0 +1,8 @@
+type: definition
+name: oszto
+slug: oszto
+locale: hu
+title: Osztó
+body:
+  - type: narrative
+    content: Az $a$ szám osztója $b$-nek, ha van olyan $c$, amelyre $ac = b$.

@@ -1,0 +1,9 @@
+type: part
+name: resz
+slug: resz
+locale: hu
+title: Rész
+chapters:
+  - egy
+  - ketto
+  - harom

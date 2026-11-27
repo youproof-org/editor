@@ -1,0 +1,7 @@
+type: chapter
+name: ketto
+slug: ketto
+locale: hu
+title: Második fejezet
+sections:
+  - listak

@@ -1,0 +1,6 @@
+type: proof
+name: alaptetel-bizonyitasa
+locale: hu
+body:
+  - type: narrative
+    content: Teljes indukcióval.

@@ -14,6 +14,7 @@ The extension bundles two packages from a services checkout, `@youproof.org/cont
 - `npm run typecheck`: `tsc` over `src/` and the two packages.
 - `npm run build`: type-checks, then bundles `out/extension.js`, `media/panel.js` and `media/editor.js` with esbuild.
 - `npm test`: type-checks, bundles, and runs `test/*.test.mjs` against `out/test/host.js`.
+- `npm run test:ui`: bundles, and runs `test/ui/*.ui.test.mjs`, which drive the real `media/editor.js` and `media/panel.js` in headless Chromium against the real extension (`out/extension.js`), with `test/ui/vscodeFake.mjs` standing in for VS Code and its editor tabs, on a copy of the small content tree in `test/ui/fixture/content`. It needs Playwright's Chromium (`npx playwright install chromium`) and takes about half a minute. With `YOUPROOF_CONTENT_DIR` set to a content checkout it also saves every real file unedited through the webview, which takes about six minutes.
 - `npm run release`: also requires the services checkout to be clean, and names its commit in the release notes.
 
 A new template or label variant reaches the editor through the content and services data it reads at runtime. A change to the packages themselves, such as a new builtin, reaches it only in a new editor build.

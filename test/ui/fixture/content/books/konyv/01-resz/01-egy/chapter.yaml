@@ -1,0 +1,16 @@
+type: chapter
+name: egy
+slug: egy
+locale: hu
+title: Első fejezet
+references:
+  - { display: the-index-section, target: books.konyv.chapters.egy.sections.primek }
+  - { display: the-index-label, target: theorems.alaptetel }
+prologue:
+  - type: narrative
+    content: >-
+      Ebben a fejezetben a prímekről lesz szó, először [0], aztán a tételek. Végül [1] következik, amely az egész fejezet
+      legfontosabb állítása, és amelyre a későbbi fejezetek is építenek.
+sections:
+  - primek
+  - tetelek

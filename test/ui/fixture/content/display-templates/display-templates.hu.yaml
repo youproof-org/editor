@@ -1,0 +1,75 @@
+# A few of the content repo's templates, enough for the UI tests.
+
+the-index-label-ine:
+  targets: [definition, theorem]
+  template: '{the(target.index)} [{target.index} {capital(base(''ine'', target.label))}]{suffix(''ine'', target.label)}'
+
+the-index-label:
+  targets: [definition, theorem]
+  template: '{the(target.index)} [{target.index} {capital(target.label.canonical)}]'
+
+index-label:
+  targets: [definition, theorem]
+  template: '{target.index} {capital(target.label.canonical)}'
+
+the-index-label-pl:
+  targets: [theorem]
+  template: '{the(target.index)} [{target.index} {capital(base(''pl'', target.label))}]{suffix(''pl'', target.label)}'
+
+the-index-label-pl-ine:
+  targets: [theorem]
+  template: '{the(target.index)} [{target.index} {capital(base(''pl-ine'', target.label))}]{suffix(''pl-ine'', target.label)}'
+
+index-label-all:
+  targets: [theorem]
+  template: '[{target.index} {capital(base(''all'', target.label))}]{suffix(''all'', target.label)}'
+
+the-index-chapter:
+  targets: [chapter]
+  template: '{the(target.index)} [{target.index} fejezet]'
+
+the-indexes-chapter-pl-ine:
+  targets: [chapter]
+  list:
+    count: { min: 2 }
+    item:
+      first: '{the(target.index)} [{target.index}]'
+      middle: '[{target.index}]'
+      last: '[{target.index} fejezet]ekben'
+      separator: ', '
+      last-separator: ' és '
+
+each-the-index-label:
+  targets: [definition, theorem]
+  list:
+    count: { min: 2 }
+    group-by: label
+    item:
+      first: '{the(target.index)} [{target.index}]'
+      last: '{the(target.index)} [{target.index} {capital(target.label.canonical)}]'
+      only: '{the(target.index)} [{target.index} {capital(target.label.canonical)}]'
+      separator: ', '
+      last-separator: ' és '
+    group:
+      separator: ', '
+      last-separator: ', valamint '
+
+the-index-section:
+  targets: [section]
+  template: '{the(target.index)} [{target.index} szakasz]'
+
+the-index:
+  targets: [chapter, section, definition, theorem, claim]
+  template: '{the(target.index)} [{target.index}]'
+
+index:
+  targets: [chapter, theorem, claim]
+  template: '{target.index}'
+
+index-chapter:
+  targets: [chapter]
+  template: '{target.index} fejezet'
+
+the-index-point:
+  targets: [claim]
+  template: '{the(target.index)} [{target.index} pont]'

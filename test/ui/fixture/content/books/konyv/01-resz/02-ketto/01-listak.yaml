@@ -1,0 +1,16 @@
+type: section
+name: listak
+slug: listak
+locale: hu
+title: Listák
+references:
+  - display: the-indexes-chapter-pl-ine
+    targets: [books.konyv.chapters.egy, books.konyv.chapters.harom]
+  - { display: the-index-chapter, target: books.konyv.chapters.egy }
+  - display: each-the-index-label
+    targets: [definitions.prim, definitions.oszto, theorems.alaptetel]
+  - { text: '[régi definíció]', target: definitions.regi }
+body:
+  - type: narrative
+    content: >-
+      Erről [0] volt szó, főleg [1]. Ide tartozik [2] is. Egy hivatkozás, amelynek a célját átnevezték: [3].

@@ -1,0 +1,27 @@
+type: definition
+name: prim
+slug: prim
+locale: hu
+title: Prím
+terms:
+  prime:
+    slug: prim
+    display: '[prím]'
+    canonical: prím
+    synonyms:
+      - prímszám
+body:
+  - type: narrative
+    content: Egy szám [[prime]], ha csak eggyel és önmagával osztható.
+  - type: claim
+    name: elso
+    slug: elso
+    content: Végtelen sok prím van.
+    formula: p_1 p_2 \cdots p_n + 1
+  - type: subsection
+    title: Megjegyzés
+    blocks:
+      - type: claim
+        name: belso
+        slug: belso
+        content: Egy alszakaszbeli állítás.

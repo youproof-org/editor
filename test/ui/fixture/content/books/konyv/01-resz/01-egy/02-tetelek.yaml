@@ -1,0 +1,17 @@
+type: section
+name: tetelek
+slug: tetelek
+locale: hu
+title: Tételek
+references:
+  - { display: the-index-label, target: theorems.alaptetel }
+  - { display: the-index-label-ine, target: definitions.oszto }
+body:
+  - type: narrative
+    content: Ebben a szakaszban [0] következik, amely [1] áll.
+  - type: embed
+    target: theorems.alaptetel
+  - type: embed
+    target: theorems.alaptetel.proofs.alaptetel-bizonyitasa
+  - type: embed
+    target: definitions.oszto

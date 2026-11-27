@@ -1,0 +1,10 @@
+type: theorem
+name: alaptetel
+slug: alaptetel
+locale: hu
+title: A számelmélet alaptétele
+proofs:
+  - alaptetel-bizonyitasa
+body:
+  - type: narrative
+    content: Minden egynél nagyobb egész szám a sorrendtől eltekintve egyértelműen prímek szorzata.

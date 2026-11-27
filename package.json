@@ -73,12 +73,14 @@
     "typecheck": "node scripts/typecheck.js",
     "build": "node scripts/typecheck.js && node scripts/build.js",
     "release": "node scripts/release.js",
-    "test": "node scripts/typecheck.js && node scripts/build.js --tests && node --test \"test/*.test.mjs\""
+    "test": "node scripts/typecheck.js && node scripts/build.js --tests && node --test \"test/*.test.mjs\"",
+    "test:ui": "node scripts/build.js --tests && node --test --test-concurrency=1 \"test/ui/*.ui.test.mjs\""
   },
   "devDependencies": {
     "@codemirror/commands": "^6.0.0",
     "@codemirror/state": "^6.0.0",
     "@codemirror/view": "^6.0.0",
+    "@playwright/test": "1.62.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/react": "^18.0.0",

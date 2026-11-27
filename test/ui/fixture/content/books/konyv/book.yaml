@@ -1,0 +1,7 @@
+type: book
+name: konyv
+slug: konyv
+locale: hu
+title: Könyv
+parts:
+  - resz
