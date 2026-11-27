@@ -65,3 +65,14 @@ export function placeReferencePopup(
     ...(width < popup.width ? { maxWidth: width } : {}),
   };
 }
+
+/**
+ * The `scrollTop` of a scrolling box that brings `item` into its `view`, both in
+ * the same coordinates, moving as little as it can: to the nearest edge, or not
+ * at all when the item is in view. An item taller than the view shows its top.
+ */
+export function nearestScrollTop(scrollTop: number, item: Pick<Rect, 'top' | 'bottom'>, view: Pick<Rect, 'top' | 'bottom'>): number {
+  if (item.top < view.top) return scrollTop - (view.top - item.top);
+  if (item.bottom > view.bottom) return scrollTop + Math.min(item.bottom - view.bottom, item.top - view.top);
+  return scrollTop;
+}

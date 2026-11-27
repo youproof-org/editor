@@ -196,7 +196,7 @@ test('on the real content, prím, prímsz and 24.16 find what authors cite', { s
   assert.equal(candidateTemplates(choices.templates, [theorem])[0].name, 'the-index-label')
 })
 
-const { placeReferencePopup, anchorInPane } = require('../out/test/webview.js')
+const { placeReferencePopup, anchorInPane, nearestScrollTop } = require('../out/test/webview.js')
 const PANE = { top: 0, bottom: 600, left: 0, right: 400 }
 const rect = (top, left, width = 80, height = 18) => ({ top, bottom: top + height, left, right: left + width })
 const covers = (placed, size, r) => placed.top < r.bottom && placed.top + (placed.maxHeight ?? size.height) > r.top
@@ -276,4 +276,12 @@ test('a second [ in an empty search box makes a term marker where the field can 
   assert.equal(secondBracketAction('', true), 'term-marker')
   assert.equal(secondBracketAction('', false), 'ignore')
   assert.equal(secondBracketAction('prím', true), 'search')
+})
+
+test('a selected row out of view scrolls to the nearest edge, and one in view stays put', () => {
+  const view = { top: 100, bottom: 300 }
+  assert.equal(nearestScrollTop(50, { top: 150, bottom: 170 }, view), 50, 'in view')
+  assert.equal(nearestScrollTop(50, { top: 300, bottom: 320 }, view), 70, 'below: its bottom at the bottom edge')
+  assert.equal(nearestScrollTop(50, { top: 80, bottom: 100 }, view), 30, 'above: its top at the top edge')
+  assert.equal(nearestScrollTop(0, { top: 320, bottom: 600 }, view), 220, 'taller than the view: its top shows')
 })

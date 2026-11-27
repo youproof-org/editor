@@ -11,6 +11,7 @@ import {
   kindsKey, leavesItemUnchanged, orderedTargets, searchReferenceTargets, targetGroups, textFromSegments, textModeProblem,
   type DraftTarget, type ReferenceDraft, type SearchHit,
 } from './referencePopupModel';
+import { nearestScrollTop } from './referencePopupPlacement';
 import {
   cancelReferenceSpec, confirmReferenceSpec, confirmSelfReferenceSpec, previewReference, probePlacement, removeReferenceSpec,
   secondBracketAction,
@@ -122,14 +123,6 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
   useLayoutEffect(() => { (focusRef.current ?? removeRef.current ?? cancelPickRef.current)?.focus(); }, [screen]);
   useEffect(() => displays?.subscribe(rerender), [displays]);
   useEffect(() => { setHitIndex(0); }, [query]);
-  useEffect(() => {
-    const row = selectedRowRef.current;
-    const list = row?.closest('.ref-popup-list');
-    if (!row || !list) return;
-    const top = row.offsetTop - (list as HTMLElement).offsetTop;
-    if (top < list.scrollTop) list.scrollTop = top;
-    else if (top + row.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + row.offsetHeight - list.clientHeight;
-  });
 
   const shownFor = (item: unknown): Shown => {
     const display = displays?.get(payloadOf(item));
@@ -258,6 +251,21 @@ export default function ReferencePopup({ request, choices, choicesError, onClose
   });
 
   const placement = useReferencePopupPlacement(popupRef, view, POPUP_WIDTH, cancel);
+
+  const selectedKey = draft?.display ?? hitIndex;
+  useLayoutEffect(() => {
+    const row = selectedRowRef.current;
+    if (!row) return;
+    const heading = row.parentElement?.firstElementChild;
+    const first = heading !== row && heading?.classList.contains('ref-popup-heading') ? heading : row;
+    for (const box of [row.closest<HTMLElement>('.ref-popup-list'), popupRef.current]) {
+      if (!box) continue;
+      const view = box.getBoundingClientRect();
+      const item = { top: first.getBoundingClientRect().top, bottom: row.getBoundingClientRect().bottom };
+      const scrollTop = nearestScrollTop(box.scrollTop, item, { top: view.top + box.clientTop, bottom: view.top + box.clientTop + box.clientHeight });
+      if (scrollTop !== box.scrollTop) box.scrollTop = scrollTop;
+    }
+  }, [selectedKey, screen, placement]);
 
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); cancel(); }
